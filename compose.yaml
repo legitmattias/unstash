@@ -1,0 +1,99 @@
+# Base Docker Compose configuration for Unstash.
+# Use with an override file:
+#   Dev:  docker compose -f compose.yaml -f compose.dev.yaml up
+#   Prod: docker compose -f compose.yaml -f compose.prod.yaml up -d
+
+name: unstash
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      target: runtime
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    secrets:
+      - database_password
+      - session_secret
+      - encryption_key
+    environment:
+      UNSTASH_ENVIRONMENT: ${UNSTASH_ENVIRONMENT:-development}
+      UNSTASH_LOG_LEVEL: ${UNSTASH_LOG_LEVEL:-INFO}
+      UNSTASH_DEBUG: "false"
+      UNSTASH_DATABASE_HOST: postgres
+      UNSTASH_DATABASE_PORT: "5432"
+      UNSTASH_DATABASE_NAME: unstash
+      UNSTASH_DATABASE_USER: unstash_app
+      UNSTASH_REDIS_HOST: redis
+      UNSTASH_REDIS_PORT: "6379"
+    networks:
+      - internal
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      target: runtime
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      ORIGIN: ${ORIGIN:-http://localhost:3000}
+      BODY_SIZE_LIMIT: "10M"
+    networks:
+      - internal
+
+  postgres:
+    image: postgres:17
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/init-db.sh:/docker-entrypoint-initdb.d/01-init-app-user.sh:ro
+    secrets:
+      - database_password
+      - database_migrations_password
+    environment:
+      POSTGRES_DB: unstash
+      POSTGRES_USER: unstash_migrations
+      POSTGRES_PASSWORD_FILE: /run/secrets/database_migrations_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U unstash_migrations -d unstash"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  internal:
+    driver: bridge
+
+secrets:
+  database_password:
+    file: ./secrets/database_password.txt
+  database_migrations_password:
+    file: ./secrets/database_migrations_password.txt
+  session_secret:
+    file: ./secrets/session_secret.txt
+  encryption_key:
+    file: ./secrets/encryption_key.txt

@@ -1,0 +1,51 @@
+# Production overrides — resource limits, restart policies, exposed ports for
+# the host reverse proxy (Caddy) to reach.
+#
+# Usage: docker compose -f compose.yaml -f compose.prod.yaml up -d
+
+services:
+  api:
+    build:
+      target: runtime
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      UNSTASH_ENVIRONMENT: production
+      UNSTASH_DEBUG: "false"
+      UNSTASH_LOG_LEVEL: INFO
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+
+  frontend:
+    build:
+      target: runtime
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      NODE_ENV: production
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+
+  postgres:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+
+  redis:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.25"
