@@ -1,25 +1,39 @@
 # Docker
 
-Container images and Docker Compose configuration for Unstash.
+Container images and Compose configuration for Unstash.
 
-## Contents
+## Dockerfiles
 
-- `backend.Dockerfile` — multi-stage build for the FastAPI backend
-- `frontend.Dockerfile` — multi-stage build for the SvelteKit frontend
-- `worker.Dockerfile` — worker image including document parsing and ML dependencies
-- `Caddyfile.snippet` — Caddy virtual host configuration
+| File | Purpose | Stages |
+|---|---|---|
+| `backend.Dockerfile` | FastAPI backend | `builder` → `dev` (hot reload) → `runtime` (production) |
+| `frontend.Dockerfile` | SvelteKit frontend | `builder` → `dev` (hot reload) → `runtime` (production) |
 
-Compose files live at the repository root: `compose.yaml`, `compose.dev.yaml`, `compose.prod.yaml`.
+Both use multi-stage builds. Development overrides (`compose.dev.yaml`) target the `dev` stage for source volume mounting and hot reload. Production overrides (`compose.prod.yaml`) target `runtime` with non-root users and health checks.
 
-## Principles
+## Supporting files
 
-- Multi-stage builds: separate build and runtime images
-- Non-root user inside containers
-- Minimal runtime images (distroless where practical)
-- Health checks defined in Dockerfiles and Compose
-- Graceful shutdown with SIGTERM handling
-- File-based Docker Compose secrets mounted at `/run/secrets/` (never environment variables for sensitive values)
+- `init-db.sh` — PostgreSQL init script that creates the restricted `unstash_app` user (DML only, no DDL, no superuser). Required for Row-Level Security to be effective.
+- `Caddyfile.snippet` — Reference Caddy virtual host configuration for production.
 
-## Getting started
+## Compose files
 
-See the top-level [README](../README.md) for the development workflow.
+Compose files live at the repo root:
+
+| File | Purpose |
+|---|---|
+| `compose.yaml` | Base: service definitions, secrets, networks, volumes |
+| `compose.dev.yaml` | Dev overrides: hot reload, exposed ports, debug logging |
+| `compose.prod.yaml` | Prod overrides: resource limits, restart policies |
+
+Usage:
+
+```sh
+# Development
+docker compose -f compose.yaml -f compose.dev.yaml up --build
+
+# Production
+docker compose -f compose.yaml -f compose.prod.yaml up -d
+```
+
+Or via Makefile: `make up` / `make down` / `make logs`.
