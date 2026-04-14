@@ -2,11 +2,19 @@
 set -euo pipefail
 
 # Create the restricted application database user.
-# The migrations user (POSTGRES_USER) is the superuser that owns the schema.
-# The app user (unstash_app) has only DML privileges — no DDL, no superuser.
-# This separation is required for Row-Level Security to be effective.
+# Reads the password from either:
+#   - UNSTASH_APP_DB_PASSWORD env var (production, set by CI)
+#   - /run/secrets/database_password file (local dev, Docker Compose secrets)
 
-APP_PASSWORD="$(< /run/secrets/database_password)"
+if [ -n "${UNSTASH_APP_DB_PASSWORD:-}" ]; then
+    APP_PASSWORD="$UNSTASH_APP_DB_PASSWORD"
+elif [ -f /run/secrets/database_password ]; then
+    APP_PASSWORD="$(< /run/secrets/database_password)"
+else
+    echo "ERROR: No app database password available." >&2
+    echo "Set UNSTASH_APP_DB_PASSWORD or mount /run/secrets/database_password" >&2
+    exit 1
+fi
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
     CREATE ROLE unstash_app
