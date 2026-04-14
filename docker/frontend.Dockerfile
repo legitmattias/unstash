@@ -1,10 +1,9 @@
-# syntax=docker/dockerfile:1
-
 # ---------------------------------------------------------------------------
 # Stage: builder — install dependencies and build
 # ---------------------------------------------------------------------------
 FROM node:22-slim AS builder
 
+ENV CI=true
 RUN corepack enable pnpm
 
 WORKDIR /app

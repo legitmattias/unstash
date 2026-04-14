@@ -58,8 +58,9 @@ secrets: ## Generate initial dev secrets (safe to re-run — won't overwrite)
 		|| python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())' \
 			> secrets/encryption_key.txt \
 		&& echo "Generated secrets/encryption_key.txt"
-	@chmod 600 secrets/*.txt
+	@chmod 644 secrets/*.txt
 	@echo "Done. Secrets are in ./secrets/"
+	@echo "Note: files are 644 for Docker Compose bind-mount compatibility."
 
 # ---------------------------------------------------------------------------
 # Cleanup

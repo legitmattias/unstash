@@ -9,7 +9,7 @@ services:
     volumes:
       - ./backend/src:/app/src:ro
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:8100:8000"
     environment:
       UNSTASH_ENVIRONMENT: development
       UNSTASH_DEBUG: "true"
@@ -22,15 +22,15 @@ services:
     volumes:
       - ./frontend/src:/app/src:ro
     ports:
-      - "127.0.0.1:5173:5173"
+      - "127.0.0.1:5174:5173"
     environment:
       NODE_ENV: development
     command: ["pnpm", "run", "dev", "--host", "0.0.0.0"]
 
   postgres:
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:5434:5432"
 
   redis:
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:6380:6379"
