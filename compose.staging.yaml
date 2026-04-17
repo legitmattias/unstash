@@ -41,6 +41,7 @@ services:
           cpus: "0.5"
 
   postgres:
+    image: ${POSTGRES_IMAGE:-ghcr.io/legitmattias/unstash-postgres}:${IMAGE_TAG:-staging}
     environment:
       POSTGRES_DB: unstash
       POSTGRES_USER: unstash_migrations
