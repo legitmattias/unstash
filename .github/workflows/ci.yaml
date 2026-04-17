@@ -165,7 +165,8 @@ jobs:
       - name: Validate compose config
         run: |
           docker compose -f compose.yaml -f compose.dev.yaml config --quiet
-          docker compose -f compose.yaml -f compose.prod.yaml config --quiet
+          docker compose -f compose.yaml -f compose.staging.yaml config --quiet
+          docker compose -f compose.yaml -f compose.production.yaml config --quiet
 
       - name: Build backend image
         run: docker build -f docker/backend.Dockerfile --target runtime -t unstash-api:ci .
