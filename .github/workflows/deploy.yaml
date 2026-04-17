@@ -4,6 +4,15 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deploy target'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
 
 env:
   REGISTRY: ghcr.io
@@ -40,7 +49,8 @@ jobs:
           push: true
           tags: |
             ${{ env.API_IMAGE }}:${{ github.sha }}
-            ${{ env.API_IMAGE }}:latest
+            ${{ env.API_IMAGE }}:staging
+            ${{ env.API_IMAGE }}:production
           cache-from: type=gha,scope=api
           cache-to: type=gha,scope=api,mode=max
 
@@ -53,15 +63,16 @@ jobs:
           push: true
           tags: |
             ${{ env.WEB_IMAGE }}:${{ github.sha }}
-            ${{ env.WEB_IMAGE }}:latest
+            ${{ env.WEB_IMAGE }}:staging
+            ${{ env.WEB_IMAGE }}:production
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
 
-  # ── Deploy to production ─────────────────────────────────
-  deploy:
+  # ── Deploy to staging (auto on push to main) ─────────────
+  deploy-staging:
     needs: build-and-push
     runs-on: ubuntu-24.04
-    environment: production
+    environment: staging
 
     steps:
       - uses: actions/checkout@v4
@@ -79,21 +90,62 @@ jobs:
       - name: Deploy
         env:
           DOCKER_HOST: ssh://${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
-          # Images
           API_IMAGE: ${{ env.API_IMAGE }}
           WEB_IMAGE: ${{ env.WEB_IMAGE }}
           IMAGE_TAG: ${{ github.sha }}
-          # App config
           ORIGIN: ${{ vars.ORIGIN }}
-          # Secrets (injected as env vars for Pydantic Settings)
           UNSTASH_DATABASE_PASSWORD: ${{ secrets.UNSTASH_DATABASE_PASSWORD }}
           UNSTASH_SESSION_SECRET: ${{ secrets.UNSTASH_SESSION_SECRET }}
           UNSTASH_ENCRYPTION_KEY: ${{ secrets.UNSTASH_ENCRYPTION_KEY }}
           POSTGRES_MIGRATIONS_PASSWORD: ${{ secrets.POSTGRES_MIGRATIONS_PASSWORD }}
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          docker compose -p unstash -f compose.yaml -f compose.prod.yaml pull
-          docker compose -p unstash -f compose.yaml -f compose.prod.yaml up -d
+          docker compose -p unstash-staging -f compose.yaml -f compose.staging.yaml pull
+          docker compose -p unstash-staging -f compose.yaml -f compose.staging.yaml up -d
+
+      - name: Health check
+        run: |
+          echo "Waiting for services to start..."
+          sleep 10
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            'curl -sf http://localhost:8010/api/health || (echo "API health check failed" && exit 1)'
+          echo "Staging deploy complete."
+
+  # ── Deploy to production (manual, workflow_dispatch only) ─
+  deploy-production:
+    needs: build-and-push
+    runs-on: ubuntu-24.04
+    environment: production
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+          printf 'Host %s\n  IdentityFile %s\n' \
+            "${{ secrets.DEPLOY_HOST }}" "$HOME/.ssh/deploy_key" > ~/.ssh/config
+          chmod 600 ~/.ssh/config
+
+      - name: Deploy
+        env:
+          DOCKER_HOST: ssh://${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+          API_IMAGE: ${{ env.API_IMAGE }}
+          WEB_IMAGE: ${{ env.WEB_IMAGE }}
+          IMAGE_TAG: ${{ github.sha }}
+          ORIGIN: ${{ vars.ORIGIN }}
+          UNSTASH_DATABASE_PASSWORD: ${{ secrets.UNSTASH_DATABASE_PASSWORD }}
+          UNSTASH_SESSION_SECRET: ${{ secrets.UNSTASH_SESSION_SECRET }}
+          UNSTASH_ENCRYPTION_KEY: ${{ secrets.UNSTASH_ENCRYPTION_KEY }}
+          POSTGRES_MIGRATIONS_PASSWORD: ${{ secrets.POSTGRES_MIGRATIONS_PASSWORD }}
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker compose -p unstash-production -f compose.yaml -f compose.production.yaml pull
+          docker compose -p unstash-production -f compose.yaml -f compose.production.yaml up -d
 
       - name: Health check
         run: |
@@ -101,4 +153,4 @@ jobs:
           sleep 10
           ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
             'curl -sf http://localhost:8000/api/health || (echo "API health check failed" && exit 1)'
-          echo "Deploy complete."
+          echo "Production deploy complete."
