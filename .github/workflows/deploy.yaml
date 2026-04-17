@@ -2,11 +2,11 @@ name: Deploy
 
 on:
   push:
-    branches: [main]
+    branches: [development, main]
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Deploy target'
+        description: 'Environment to re-deploy (manual redeploy of current branch head)'
         required: true
         default: 'staging'
         type: choice
@@ -87,11 +87,14 @@ jobs:
           cache-from: type=gha,scope=postgres
           cache-to: type=gha,scope=postgres,mode=max
 
-  # ── Deploy to staging (auto on push to main) ─────────────
+  # ── Deploy to staging (auto on push to development) ──────
   deploy-staging:
     needs: build-and-push
     runs-on: ubuntu-24.04
     environment: staging
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/development') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
 
     steps:
       - uses: actions/checkout@v4
@@ -127,12 +130,14 @@ jobs:
             'curl -sf http://localhost:8010/api/health || (echo "API health check failed" && exit 1)'
           echo "Staging deploy complete."
 
-  # ── Deploy to production (manual, workflow_dispatch only) ─
+  # ── Deploy to production (auto on push to main) ──────────
   deploy-production:
     needs: build-and-push
     runs-on: ubuntu-24.04
     environment: production
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production'
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
 
     steps:
       - uses: actions/checkout@v4
