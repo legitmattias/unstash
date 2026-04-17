@@ -18,6 +18,7 @@ env:
   REGISTRY: ghcr.io
   API_IMAGE: ghcr.io/legitmattias/unstash-api
   WEB_IMAGE: ghcr.io/legitmattias/unstash-web
+  POSTGRES_IMAGE: ghcr.io/legitmattias/unstash-postgres
 
 jobs:
   # ── Build and push Docker images to GHCR ─────────────────
@@ -68,6 +69,19 @@ jobs:
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
 
+      - name: Build and push Postgres image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/postgres.Dockerfile
+          push: true
+          tags: |
+            ${{ env.POSTGRES_IMAGE }}:${{ github.sha }}
+            ${{ env.POSTGRES_IMAGE }}:staging
+            ${{ env.POSTGRES_IMAGE }}:production
+          cache-from: type=gha,scope=postgres
+          cache-to: type=gha,scope=postgres,mode=max
+
   # ── Deploy to staging (auto on push to main) ─────────────
   deploy-staging:
     needs: build-and-push
@@ -92,6 +106,7 @@ jobs:
           DOCKER_HOST: ssh://${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
           API_IMAGE: ${{ env.API_IMAGE }}
           WEB_IMAGE: ${{ env.WEB_IMAGE }}
+          POSTGRES_IMAGE: ${{ env.POSTGRES_IMAGE }}
           IMAGE_TAG: ${{ github.sha }}
           ORIGIN: ${{ vars.ORIGIN }}
           UNSTASH_DATABASE_PASSWORD: ${{ secrets.UNSTASH_DATABASE_PASSWORD }}
@@ -136,6 +151,7 @@ jobs:
           DOCKER_HOST: ssh://${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
           API_IMAGE: ${{ env.API_IMAGE }}
           WEB_IMAGE: ${{ env.WEB_IMAGE }}
+          POSTGRES_IMAGE: ${{ env.POSTGRES_IMAGE }}
           IMAGE_TAG: ${{ github.sha }}
           ORIGIN: ${{ vars.ORIGIN }}
           UNSTASH_DATABASE_PASSWORD: ${{ secrets.UNSTASH_DATABASE_PASSWORD }}
