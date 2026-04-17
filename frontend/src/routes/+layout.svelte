@@ -1,7 +1,6 @@
 <script lang="ts">
 	import 'open-props/style';
 	import 'open-props/normalize';
-	import '@fontsource-variable/inter';
 
 	let { children } = $props();
 </script>
@@ -11,11 +10,6 @@
 </div>
 
 <style>
-	:global(:root) {
-		--font-sans:
-			'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', sans-serif;
-	}
-
 	.app {
 		min-height: 100dvh;
 		display: grid;
