@@ -21,8 +21,13 @@ env:
   POSTGRES_IMAGE: ghcr.io/legitmattias/unstash-postgres
 
 jobs:
+  # ── Gate: CI must pass before anything else runs ─────────
+  ci:
+    uses: ./.github/workflows/ci.yaml
+
   # ── Build and push Docker images to GHCR ─────────────────
   build-and-push:
+    needs: ci
     runs-on: ubuntu-24.04
     permissions:
       contents: read
