@@ -15,8 +15,11 @@ COPY backend/pyproject.toml backend/uv.lock backend/README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 # Copy source and install the project itself.
+# --no-editable bakes the source into site-packages so the runtime stage
+# doesn't need /app/src. The dev stage below re-syncs with dev deps, which
+# is compatible with runtime's non-editable install.
 COPY backend/src ./src
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --no-editable
 
 # ---------------------------------------------------------------------------
 # Stage: dev — local development with hot reload
