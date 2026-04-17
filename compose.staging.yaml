@@ -1,0 +1,62 @@
+# Staging overrides — GHCR images tagged :staging, env var secrets (injected
+# by CI), host ports offset from production (8010/3510) for same-host
+# coexistence, lower resource limits.
+#
+# Usage (from CI):
+#   DOCKER_HOST=ssh://... docker compose -p unstash-staging \
+#     -f compose.yaml -f compose.staging.yaml up -d
+
+services:
+  api:
+    image: ${API_IMAGE:-ghcr.io/legitmattias/unstash-api}:${IMAGE_TAG:-staging}
+    ports:
+      - "127.0.0.1:8010:8000"
+    environment:
+      UNSTASH_ENVIRONMENT: staging
+      UNSTASH_DEBUG: "false"
+      UNSTASH_LOG_LEVEL: DEBUG
+      UNSTASH_DATABASE_PASSWORD: ${UNSTASH_DATABASE_PASSWORD}
+      UNSTASH_SESSION_SECRET: ${UNSTASH_SESSION_SECRET}
+      UNSTASH_ENCRYPTION_KEY: ${UNSTASH_ENCRYPTION_KEY}
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: "0.75"
+
+  frontend:
+    image: ${WEB_IMAGE:-ghcr.io/legitmattias/unstash-web}:${IMAGE_TAG:-staging}
+    ports:
+      - "127.0.0.1:3510:3000"
+    environment:
+      NODE_ENV: production
+      ORIGIN: ${ORIGIN:-https://staging.unstash.mattic.dev}
+      BODY_SIZE_LIMIT: "10M"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 192M
+          cpus: "0.5"
+
+  postgres:
+    environment:
+      POSTGRES_DB: unstash
+      POSTGRES_USER: unstash_migrations
+      POSTGRES_PASSWORD: ${POSTGRES_MIGRATIONS_PASSWORD}
+      UNSTASH_APP_DB_PASSWORD: ${UNSTASH_DATABASE_PASSWORD}
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+
+  redis:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: "0.25"

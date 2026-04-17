@@ -1,15 +1,13 @@
-# Production overrides — GHCR images, env var secrets (injected by CI),
-# resource limits, restart policies.
+# Production overrides — GHCR images tagged :production, env var secrets
+# (injected by CI), resource limits, restart policies.
 #
-# Secrets come from GitHub Actions environment, not from files.
-# The Pydantic Settings config reads both env vars and /run/secrets/
-# transparently, so the application code is the same.
-#
-# Usage (from CI): DOCKER_HOST=ssh://... docker compose -f compose.yaml -f compose.prod.yaml up -d
+# Usage (from CI):
+#   DOCKER_HOST=ssh://... docker compose -p unstash-production \
+#     -f compose.yaml -f compose.production.yaml up -d
 
 services:
   api:
-    image: ${API_IMAGE:-ghcr.io/legitmattias/unstash-api}:${IMAGE_TAG:-latest}
+    image: ${API_IMAGE:-ghcr.io/legitmattias/unstash-api}:${IMAGE_TAG:-production}
     ports:
       - "127.0.0.1:8000:8000"
     environment:
@@ -27,7 +25,7 @@ services:
           cpus: "1.0"
 
   frontend:
-    image: ${WEB_IMAGE:-ghcr.io/legitmattias/unstash-web}:${IMAGE_TAG:-latest}
+    image: ${WEB_IMAGE:-ghcr.io/legitmattias/unstash-web}:${IMAGE_TAG:-production}
     ports:
       - "127.0.0.1:3500:3000"
     environment:
