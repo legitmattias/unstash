@@ -1,5 +1,10 @@
-# Production overrides — GHCR images tagged :production, env var secrets
-# (injected by CI), resource limits, restart policies.
+# Production overrides — GHCR images tagged :production, file-based secrets
+# mounted from the VPS filesystem, resource limits, restart policies.
+#
+# Secrets live at /opt/unstash/secrets/production/ on the VPS with 0600
+# permissions, owned by the deploy user. CI never sees these values — it only
+# builds images and runs `docker compose up` on the remote daemon, which
+# mounts the files into containers at /run/secrets/<name>.
 #
 # Usage (from CI):
 #   DOCKER_HOST=ssh://... docker compose -p unstash-production \
@@ -10,13 +15,14 @@ services:
     image: ${API_IMAGE:-ghcr.io/legitmattias/unstash-api}:${IMAGE_TAG:-production}
     ports:
       - "127.0.0.1:8000:8000"
+    secrets:
+      - database_password
+      - session_secret
+      - encryption_key
     environment:
       UNSTASH_ENVIRONMENT: production
       UNSTASH_DEBUG: "false"
       UNSTASH_LOG_LEVEL: INFO
-      UNSTASH_DATABASE_PASSWORD: ${UNSTASH_DATABASE_PASSWORD}
-      UNSTASH_SESSION_SECRET: ${UNSTASH_SESSION_SECRET}
-      UNSTASH_ENCRYPTION_KEY: ${UNSTASH_ENCRYPTION_KEY}
     restart: unless-stopped
     deploy:
       resources:
@@ -41,11 +47,13 @@ services:
 
   postgres:
     image: ${POSTGRES_IMAGE:-ghcr.io/legitmattias/unstash-postgres}:${IMAGE_TAG:-production}
+    secrets:
+      - database_password
+      - database_migrations_password
     environment:
       POSTGRES_DB: unstash
       POSTGRES_USER: unstash_migrations
-      POSTGRES_PASSWORD: ${POSTGRES_MIGRATIONS_PASSWORD}
-      UNSTASH_APP_DB_PASSWORD: ${UNSTASH_DATABASE_PASSWORD}
+      POSTGRES_PASSWORD_FILE: /run/secrets/database_migrations_password
     restart: unless-stopped
     deploy:
       resources:
@@ -60,3 +68,13 @@ services:
         limits:
           memory: 128M
           cpus: "0.25"
+
+secrets:
+  database_password:
+    file: /opt/unstash/secrets/production/database_password
+  database_migrations_password:
+    file: /opt/unstash/secrets/production/database_migrations_password
+  session_secret:
+    file: /opt/unstash/secrets/production/session_secret
+  encryption_key:
+    file: /opt/unstash/secrets/production/encryption_key

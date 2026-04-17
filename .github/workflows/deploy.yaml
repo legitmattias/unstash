@@ -114,10 +114,6 @@ jobs:
           POSTGRES_IMAGE: ${{ env.POSTGRES_IMAGE }}
           IMAGE_TAG: ${{ github.sha }}
           ORIGIN: ${{ vars.ORIGIN }}
-          UNSTASH_DATABASE_PASSWORD: ${{ secrets.UNSTASH_DATABASE_PASSWORD }}
-          UNSTASH_SESSION_SECRET: ${{ secrets.UNSTASH_SESSION_SECRET }}
-          UNSTASH_ENCRYPTION_KEY: ${{ secrets.UNSTASH_ENCRYPTION_KEY }}
-          POSTGRES_MIGRATIONS_PASSWORD: ${{ secrets.POSTGRES_MIGRATIONS_PASSWORD }}
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           docker compose -p unstash-staging -f compose.yaml -f compose.staging.yaml pull
@@ -159,10 +155,6 @@ jobs:
           POSTGRES_IMAGE: ${{ env.POSTGRES_IMAGE }}
           IMAGE_TAG: ${{ github.sha }}
           ORIGIN: ${{ vars.ORIGIN }}
-          UNSTASH_DATABASE_PASSWORD: ${{ secrets.UNSTASH_DATABASE_PASSWORD }}
-          UNSTASH_SESSION_SECRET: ${{ secrets.UNSTASH_SESSION_SECRET }}
-          UNSTASH_ENCRYPTION_KEY: ${{ secrets.UNSTASH_ENCRYPTION_KEY }}
-          POSTGRES_MIGRATIONS_PASSWORD: ${{ secrets.POSTGRES_MIGRATIONS_PASSWORD }}
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           docker compose -p unstash-production -f compose.yaml -f compose.production.yaml pull

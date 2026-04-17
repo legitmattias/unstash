@@ -1,6 +1,11 @@
-# Staging overrides — GHCR images tagged :staging, env var secrets (injected
-# by CI), host ports offset from production (8010/3510) for same-host
-# coexistence, lower resource limits.
+# Staging overrides — GHCR images tagged :staging, file-based secrets
+# mounted from the VPS filesystem, host ports offset from production
+# (8010/3510) for same-host coexistence, lower resource limits.
+#
+# Secrets live at /opt/unstash/secrets/staging/ on the VPS with 0600
+# permissions, owned by the deploy user. CI never sees these values — it only
+# builds images and runs `docker compose up` on the remote daemon, which
+# mounts the files into containers at /run/secrets/<name>.
 #
 # Usage (from CI):
 #   DOCKER_HOST=ssh://... docker compose -p unstash-staging \
@@ -11,13 +16,14 @@ services:
     image: ${API_IMAGE:-ghcr.io/legitmattias/unstash-api}:${IMAGE_TAG:-staging}
     ports:
       - "127.0.0.1:8010:8000"
+    secrets:
+      - database_password
+      - session_secret
+      - encryption_key
     environment:
       UNSTASH_ENVIRONMENT: staging
       UNSTASH_DEBUG: "false"
       UNSTASH_LOG_LEVEL: DEBUG
-      UNSTASH_DATABASE_PASSWORD: ${UNSTASH_DATABASE_PASSWORD}
-      UNSTASH_SESSION_SECRET: ${UNSTASH_SESSION_SECRET}
-      UNSTASH_ENCRYPTION_KEY: ${UNSTASH_ENCRYPTION_KEY}
     restart: unless-stopped
     deploy:
       resources:
@@ -42,11 +48,13 @@ services:
 
   postgres:
     image: ${POSTGRES_IMAGE:-ghcr.io/legitmattias/unstash-postgres}:${IMAGE_TAG:-staging}
+    secrets:
+      - database_password
+      - database_migrations_password
     environment:
       POSTGRES_DB: unstash
       POSTGRES_USER: unstash_migrations
-      POSTGRES_PASSWORD: ${POSTGRES_MIGRATIONS_PASSWORD}
-      UNSTASH_APP_DB_PASSWORD: ${UNSTASH_DATABASE_PASSWORD}
+      POSTGRES_PASSWORD_FILE: /run/secrets/database_migrations_password
     restart: unless-stopped
     deploy:
       resources:
@@ -61,3 +69,13 @@ services:
         limits:
           memory: 64M
           cpus: "0.25"
+
+secrets:
+  database_password:
+    file: /opt/unstash/secrets/staging/database_password
+  database_migrations_password:
+    file: /opt/unstash/secrets/staging/database_migrations_password
+  session_secret:
+    file: /opt/unstash/secrets/staging/session_secret
+  encryption_key:
+    file: /opt/unstash/secrets/staging/encryption_key
