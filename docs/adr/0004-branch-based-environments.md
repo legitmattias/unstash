@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted (amended 2026-04-19 — see Amendment section below)
 
 ## Context
 
@@ -92,6 +92,24 @@ Rejected because the problem it solves (environment state tracking) is also solv
 - The `development` branch is the default branch on GitHub. New PRs target it by default.
 - Opening a PR from a feature branch to `main` directly is allowed but discouraged — it bypasses the staging gate. Reserve for genuine hotfixes.
 - After merging `main` back with a hotfix, immediately open a follow-up PR merging `main` into `development` to keep them aligned.
+
+## Amendment — 2026-04-19
+
+When implementing branch protection rulesets on GitHub, the original policy ("branch protection on both branches: no direct pushes") was softened. The revised policy is:
+
+- **`main` is protected.** GitHub ruleset `main-protected`: require PR, require passing CI status checks, require conversation resolution, block force pushes, block deletions. Zero required approvals (solo project — the PR is the record, not the approval).
+- **`development` is not branch-protected.** Direct pushes are allowed. CI still runs on every push because the CI workflow triggers on push to `development`, but the deploy step is gated on CI success within the workflow itself.
+
+**Rationale for the relaxation:** the original model treated staging as something to protect against accidents. In practice, local development and staging together form the "playground" tier — the place where breaking things is the point. Production is the only environment where mistakes have real blast radius. Forcing a PR for every change to `development` added friction without adding safety; the CI gate inside the deploy workflow already prevents broken code from reaching staging containers.
+
+**What this changes:**
+
+- Feature work can still flow through PRs to `development` when review is wanted, but a direct push to `development` is no longer a policy violation for small or exploratory changes.
+- The `development → main` promotion PR remains the binding "I am shipping this" action.
+- The invariant "`main` HEAD equals production" is preserved.
+- Hotfixes bypassing staging remain discouraged but possible via PR directly to `main`.
+
+ADR 0004 is not superseded — the two-branch environment model stands. Only the enforcement on `development` is relaxed.
 
 ## References
 
