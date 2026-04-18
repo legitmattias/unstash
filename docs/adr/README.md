@@ -24,6 +24,9 @@ Each ADR follows Michael Nygard's structure:
 |---|---|---|
 | [0000](./0000-record-architecture-decisions.md) | Record Architecture Decisions | Accepted |
 | [0001](./0001-initial-stack-choices.md) | Initial Stack Choices | Accepted |
+| [0002](./0002-ci-driven-deployment.md) | CI-Driven Deployment via SSH Docker Context | Accepted |
+| [0003](./0003-file-based-secrets-on-vps.md) | File-Based Secrets on the VPS | Accepted |
+| [0004](./0004-branch-based-environments.md) | Branch-Based Environments (development → staging, main → production) | Accepted |
 
 ## Creating a new ADR
 
