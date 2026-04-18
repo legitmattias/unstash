@@ -34,7 +34,7 @@ chmod 600 secrets/*.txt
 
 ## Production
 
-On the production server, secrets live in `/opt/unstash/secrets/` (or similar path outside the repo clone). Docker Compose references them via the `file:` directive. They are uploaded manually via SCP, never through git or CI.
+Production and staging secrets live on the deployment host, outside of CI. Docker Compose references them via the `file:` directive. CI never sees the values — it only triggers image pulls and container restarts on the remote daemon. See the relevant ADR for the decision rationale.
 
 ## Rotation
 

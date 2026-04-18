@@ -2,10 +2,10 @@
 # mounted from the VPS filesystem, host ports offset from production
 # (8010/3510) for same-host coexistence, lower resource limits.
 #
-# Secrets live at /opt/unstash/secrets/staging/ on the VPS with 0600
-# permissions, owned by the deploy user. CI never sees these values — it only
-# builds images and runs `docker compose up` on the remote daemon, which
-# mounts the files into containers at /run/secrets/<name>.
+# Secrets live at /opt/unstash/secrets/staging/ on the VPS, owned by the
+# deploy user with restrictive directory permissions. CI never sees these
+# values — it only builds images and runs `docker compose up` on the remote
+# daemon, which bind-mounts the files into containers at /run/secrets/<name>.
 #
 # Usage (from CI):
 #   DOCKER_HOST=ssh://... docker compose -p unstash-staging \

@@ -1,10 +1,10 @@
 # Production overrides — GHCR images tagged :production, file-based secrets
 # mounted from the VPS filesystem, resource limits, restart policies.
 #
-# Secrets live at /opt/unstash/secrets/production/ on the VPS with 0600
-# permissions, owned by the deploy user. CI never sees these values — it only
-# builds images and runs `docker compose up` on the remote daemon, which
-# mounts the files into containers at /run/secrets/<name>.
+# Secrets live at /opt/unstash/secrets/production/ on the VPS, owned by the
+# deploy user with restrictive directory permissions. CI never sees these
+# values — it only builds images and runs `docker compose up` on the remote
+# daemon, which bind-mounts the files into containers at /run/secrets/<name>.
 #
 # Usage (from CI):
 #   DOCKER_HOST=ssh://... docker compose -p unstash-production \
