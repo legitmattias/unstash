@@ -6,7 +6,11 @@ Runbooks are written during development when the relevant code is fresh, and upd
 
 ## Index
 
-Runbooks will be added as the relevant components are implemented. Planned runbooks:
+Written:
+
+- `vps-maintenance.md` — shared VPS operations: tier upgrades, volume management, OS patching, reboots, common stuck states.
+
+Planned (added as the relevant components are implemented):
 
 - `deploy.md` — deployment procedure
 - `rollback.md` — rolling back a deployment
