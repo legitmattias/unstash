@@ -1,10 +1,10 @@
 # Production overrides — GHCR images tagged :production, file-based secrets
 # mounted from the VPS filesystem, resource limits, restart policies.
 #
-# Secrets live at /opt/unstash/secrets/production/ on the VPS with 0600
-# permissions, owned by the deploy user. CI never sees these values — it only
-# builds images and runs `docker compose up` on the remote daemon, which
-# mounts the files into containers at /run/secrets/<name>.
+# Secrets live at /opt/unstash/secrets/production/ on the VPS, owned by the
+# deploy user with restrictive directory permissions. CI never sees these
+# values — it only builds images and runs `docker compose up` on the remote
+# daemon, which bind-mounts the files into containers at /run/secrets/<name>.
 #
 # Usage (from CI):
 #   DOCKER_HOST=ssh://... docker compose -p unstash-production \
@@ -36,7 +36,7 @@ services:
       - "127.0.0.1:3500:3000"
     environment:
       NODE_ENV: production
-      ORIGIN: ${ORIGIN:-https://unstash.mattic.dev}
+      ORIGIN: ${ORIGIN:?ORIGIN must be set (e.g., https://app.example.com)}
       BODY_SIZE_LIMIT: "10M"
     restart: unless-stopped
     deploy:
@@ -50,10 +50,10 @@ services:
     secrets:
       - database_password
       - database_migrations_password
+      - postgres_superuser_password
     environment:
       POSTGRES_DB: unstash
-      POSTGRES_USER: unstash_migrations
-      POSTGRES_PASSWORD_FILE: /run/secrets/database_migrations_password
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_superuser_password
     restart: unless-stopped
     deploy:
       resources:
@@ -74,6 +74,8 @@ secrets:
     file: /opt/unstash/secrets/production/database_password
   database_migrations_password:
     file: /opt/unstash/secrets/production/database_migrations_password
+  postgres_superuser_password:
+    file: /opt/unstash/secrets/production/postgres_superuser_password
   session_secret:
     file: /opt/unstash/secrets/production/session_secret
   encryption_key:

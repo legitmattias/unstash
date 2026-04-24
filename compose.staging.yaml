@@ -2,10 +2,10 @@
 # mounted from the VPS filesystem, host ports offset from production
 # (8010/3510) for same-host coexistence, lower resource limits.
 #
-# Secrets live at /opt/unstash/secrets/staging/ on the VPS with 0600
-# permissions, owned by the deploy user. CI never sees these values — it only
-# builds images and runs `docker compose up` on the remote daemon, which
-# mounts the files into containers at /run/secrets/<name>.
+# Secrets live at /opt/unstash/secrets/staging/ on the VPS, owned by the
+# deploy user with restrictive directory permissions. CI never sees these
+# values — it only builds images and runs `docker compose up` on the remote
+# daemon, which bind-mounts the files into containers at /run/secrets/<name>.
 #
 # Usage (from CI):
 #   DOCKER_HOST=ssh://... docker compose -p unstash-staging \
@@ -37,7 +37,7 @@ services:
       - "127.0.0.1:3510:3000"
     environment:
       NODE_ENV: production
-      ORIGIN: ${ORIGIN:-https://staging.unstash.mattic.dev}
+      ORIGIN: ${ORIGIN:?ORIGIN must be set (e.g., https://staging.example.com)}
       BODY_SIZE_LIMIT: "10M"
     restart: unless-stopped
     deploy:
@@ -51,10 +51,10 @@ services:
     secrets:
       - database_password
       - database_migrations_password
+      - postgres_superuser_password
     environment:
       POSTGRES_DB: unstash
-      POSTGRES_USER: unstash_migrations
-      POSTGRES_PASSWORD_FILE: /run/secrets/database_migrations_password
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_superuser_password
     restart: unless-stopped
     deploy:
       resources:
@@ -75,6 +75,8 @@ secrets:
     file: /opt/unstash/secrets/staging/database_password
   database_migrations_password:
     file: /opt/unstash/secrets/staging/database_migrations_password
+  postgres_superuser_password:
+    file: /opt/unstash/secrets/staging/postgres_superuser_password
   session_secret:
     file: /opt/unstash/secrets/staging/session_secret
   encryption_key:

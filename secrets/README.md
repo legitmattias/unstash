@@ -15,8 +15,9 @@ Each secret is a single file containing only the secret value, with no trailing 
 
 | File | Purpose | How to generate |
 |---|---|---|
-| `database_password.txt` | PostgreSQL password for the `unstash_app` user | `openssl rand -base64 32` |
-| `database_migrations_password.txt` | PostgreSQL password for the `unstash_migrations` user (schema owner) | `openssl rand -base64 32` |
+| `postgres_superuser_password.txt` | PostgreSQL password for the `postgres` superuser. Used by the container only during first boot to run the init script; never used by application or migration code afterwards. | `openssl rand -base64 32` |
+| `database_password.txt` | PostgreSQL password for the `unstash_app` user (DML only, NOBYPASSRLS) | `openssl rand -base64 32` |
+| `database_migrations_password.txt` | PostgreSQL password for the `unstash_migrations` user (schema owner, BYPASSRLS, used by Alembic only) | `openssl rand -base64 32` |
 | `redis_password.txt` | Redis password | `openssl rand -base64 32` |
 | `session_secret.txt` | Secret key for session cookie signing | `openssl rand -base64 64` |
 | `encryption_key.txt` | Fernet key for encrypting OAuth connector tokens at rest | `python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'` |
@@ -34,7 +35,7 @@ chmod 600 secrets/*.txt
 
 ## Production
 
-On the production server, secrets live in `/opt/unstash/secrets/` (or similar path outside the repo clone). Docker Compose references them via the `file:` directive. They are uploaded manually via SCP, never through git or CI.
+Production and staging secrets live on the deployment host, outside of CI. Docker Compose references them via the `file:` directive. CI never sees the values — it only triggers image pulls and container restarts on the remote daemon. See the relevant ADR for the decision rationale.
 
 ## Rotation
 

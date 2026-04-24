@@ -157,11 +157,13 @@ jobs:
       - name: Create placeholder secrets for config validation
         run: |
           mkdir -p secrets
-          for f in database_password database_migrations_password session_secret encryption_key; do
+          for f in database_password database_migrations_password postgres_superuser_password session_secret encryption_key; do
             echo "ci-placeholder" > "secrets/${f}.txt"
           done
 
       - name: Validate compose config
+        env:
+          ORIGIN: http://ci-validation.local
         run: |
           docker compose -f compose.yaml -f compose.dev.yaml config --quiet
           docker compose -f compose.yaml -f compose.staging.yaml config --quiet
