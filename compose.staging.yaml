@@ -51,10 +51,10 @@ services:
     secrets:
       - database_password
       - database_migrations_password
+      - postgres_superuser_password
     environment:
       POSTGRES_DB: unstash
-      POSTGRES_USER: unstash_migrations
-      POSTGRES_PASSWORD_FILE: /run/secrets/database_migrations_password
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_superuser_password
     restart: unless-stopped
     deploy:
       resources:
@@ -75,6 +75,8 @@ secrets:
     file: /opt/unstash/secrets/staging/database_password
   database_migrations_password:
     file: /opt/unstash/secrets/staging/database_migrations_password
+  postgres_superuser_password:
+    file: /opt/unstash/secrets/staging/postgres_superuser_password
   session_secret:
     file: /opt/unstash/secrets/staging/session_secret
   encryption_key:
