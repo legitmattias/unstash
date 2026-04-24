@@ -37,7 +37,7 @@ services:
       - "127.0.0.1:3510:3000"
     environment:
       NODE_ENV: production
-      ORIGIN: ${ORIGIN:-https://staging.unstash.mattic.dev}
+      ORIGIN: ${ORIGIN:?ORIGIN must be set (e.g., https://staging.example.com)}
       BODY_SIZE_LIMIT: "10M"
     restart: unless-stopped
     deploy:

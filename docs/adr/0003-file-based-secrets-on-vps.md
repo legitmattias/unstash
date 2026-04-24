@@ -8,7 +8,7 @@ Accepted
 
 Unstash requires several runtime secrets: the application database password, the database migrations password, a session cookie signing key, and a Fernet key for encrypting OAuth tokens at rest. These values must be available to containers at startup but must never appear in version control or be accessible to unauthorized parties.
 
-Engineering standards (§2) mandate file-based secrets mounted at `/run/secrets/<name>` rather than environment variables, because environment variables leak through multiple vectors: `docker inspect`, crash dumps, log output, child process inheritance, and `/proc/<pid>/environ` readable by any process that can read the directory.
+File-based secrets mounted at `/run/secrets/<name>` are preferred over environment variables, because environment variables leak through multiple vectors: `docker inspect`, crash dumps, log output, child process inheritance, and `/proc/<pid>/environ` readable by any process that can read the directory.
 
 Three implementation patterns are compatible with the file-based approach:
 
@@ -16,7 +16,7 @@ Three implementation patterns are compatible with the file-based approach:
 2. **File-based with CI-written files.** CI holds the values, writes them to the VPS filesystem as temporary files during deploy, compose mounts them, and CI optionally removes them afterwards.
 3. **File-based with persistent on-VPS files.** Secret files live on the VPS at a stable location, placed once during infrastructure setup. CI never sees the values — it only triggers `docker compose up -d`, and the local daemon mounts the files into containers.
 
-An earlier iteration of this project used pattern 1 (env-var injection). It worked but contradicts engineering-standards §2 and was flagged as a deviation that needed correction.
+An earlier iteration of this project used pattern 1 (env-var injection). It worked but was identified as a deviation from the file-based-secrets baseline and corrected.
 
 ## Decision
 

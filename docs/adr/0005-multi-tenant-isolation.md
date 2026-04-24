@@ -15,7 +15,7 @@ Two mechanisms can enforce tenant scoping, and the question is which to use:
 
 There is also the question of **how the active org is determined per request** — ambient session state, or explicit per-request URL/header identification.
 
-Engineering standards treat multi-tenant isolation as non-negotiable (see `engineering-standards.md` §3). M2 is the milestone where the enforcement model is built in from the start. Retrofitting RLS onto a working system is notoriously leaky; adding an application filter late is similarly error-prone. The decision must be made now.
+Multi-tenant isolation is treated as non-negotiable for this project: a cross-tenant data leak is the worst possible bug. M2 is the milestone where the enforcement model is built in from the start. Retrofitting RLS onto a working system is notoriously leaky; adding an application filter late is similarly error-prone. The decision must be made now.
 
 ## Decision
 
@@ -143,6 +143,4 @@ These tests run in CI against a real PostgreSQL (via testcontainers), not a mock
 
 ## References
 
-- `engineering-standards.md` in the planning repo, §3 (Multi-Tenant Isolation) — the binding standard this ADR implements.
-- M2 milestone doc — where this ADR's decisions land in concrete deliverables.
 - PostgreSQL documentation on Row-Level Security — the authoritative reference for policy syntax and semantics.

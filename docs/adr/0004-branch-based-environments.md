@@ -79,9 +79,8 @@ Rejected because the problem it solves (environment state tracking) is also solv
 
 **Negative:**
 
-- Every change to production requires two pull requests (feature → development, then development → main). For a solo project where both PRs are reviewed by the same person, this is some overhead. The overhead is the entire point of the model — the development → main PR is the "I am shipping this" action.
+- Every change to production requires two pull requests (feature → development, then development → main). When both PRs are reviewed by the same person, this is some overhead. The overhead is the entire point of the model — the development → main PR is the "I am shipping this" action.
 - Hotfixes that must bypass staging need a convention: cherry-pick from a feature branch to both `development` and `main`, or hotfix directly on `main` followed by merging `main` back into `development`. The latter is preferred; see runbook (to be written).
-- The master plan and CLAUDE.md needed updating to reflect this model.
 
 **Neutral:**
 
@@ -97,7 +96,7 @@ Rejected because the problem it solves (environment state tracking) is also solv
 
 When implementing branch protection rulesets on GitHub, the original policy ("branch protection on both branches: no direct pushes") was softened. The revised policy is:
 
-- **`main` is protected.** GitHub ruleset `main-protected`: require PR, require passing CI status checks, require conversation resolution, block force pushes, block deletions. Zero required approvals (solo project — the PR is the record, not the approval).
+- **`main` is protected.** GitHub ruleset `main-protected`: require PR, require passing CI status checks, require conversation resolution, block force pushes, block deletions. Zero required approvals at present — the PR itself is the record of intent. Approval requirements can be added later without changing the branch model.
 - **`development` is not branch-protected.** Direct pushes are allowed. CI still runs on every push because the CI workflow triggers on push to `development`, but the deploy step is gated on CI success within the workflow itself.
 
 **Rationale for the relaxation:** the original model treated staging as something to protect against accidents. In practice, local development and staging together form the "playground" tier — the place where breaking things is the point. Production is the only environment where mistakes have real blast radius. Forcing a PR for every change to `development` added friction without adding safety; the CI gate inside the deploy workflow already prevents broken code from reaching staging containers.
@@ -114,4 +113,3 @@ ADR 0004 is not superseded — the two-branch environment model stands. Only the
 ## References
 
 - ADR 0002 — CI-driven deployment (defines what "deploy" means)
-- `engineering-standards.md` in the planning repo — git practices
