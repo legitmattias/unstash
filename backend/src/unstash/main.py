@@ -11,8 +11,11 @@ from fastapi import FastAPI
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+from sqlalchemy import text
+
 from unstash.__about__ import __version__
 from unstash.config import get_settings
+from unstash.db import dispose_engine, get_engine
 from unstash.logging import setup_logging
 
 logger = structlog.get_logger(__name__)
@@ -29,8 +32,19 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         environment=settings.environment,
         version=__version__,
     )
-    yield
-    logger.info("stopping")
+
+    # Open a connection on startup to fail fast if the database is unreachable
+    # or the configured user can't authenticate. Without this, errors only
+    # surface on the first request.
+    engine = get_engine()
+    async with engine.begin() as conn:
+        await conn.execute(text("SELECT 1"))
+
+    try:
+        yield
+    finally:
+        await dispose_engine()
+        logger.info("stopping")
 
 
 def create_app() -> FastAPI:
