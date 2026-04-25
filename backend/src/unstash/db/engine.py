@@ -1,12 +1,13 @@
 """Async SQLAlchemy engine factory.
 
-A single engine instance is held per process and lazily initialized on first
-use. The lifespan handler in ``unstash.main`` is responsible for disposing it
-on shutdown.
+A single engine instance is held per process via ``functools.lru_cache``. The
+lifespan handler in ``unstash.main`` is responsible for disposing it on
+shutdown.
 """
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -17,19 +18,14 @@ if TYPE_CHECKING:
     from unstash.config import Settings
 
 
-_engine: AsyncEngine | None = None
-
-
+@lru_cache(maxsize=1)
 def get_engine() -> AsyncEngine:
     """Return the process-wide async engine, creating it on first call.
 
     The engine connects as ``unstash_app`` and is intended for application
     runtime use — never for migrations.
     """
-    global _engine
-    if _engine is None:
-        _engine = _create_engine(get_settings())
-    return _engine
+    return _create_engine(get_settings())
 
 
 async def dispose_engine() -> None:
@@ -38,10 +34,10 @@ async def dispose_engine() -> None:
     Call from the FastAPI lifespan shutdown so connections are returned to
     PostgreSQL cleanly rather than waiting for OS-level socket teardown.
     """
-    global _engine
-    if _engine is not None:
-        await _engine.dispose()
-        _engine = None
+    if get_engine.cache_info().currsize > 0:
+        engine = get_engine()
+        await engine.dispose()
+        get_engine.cache_clear()
 
 
 def _create_engine(settings: Settings) -> AsyncEngine:

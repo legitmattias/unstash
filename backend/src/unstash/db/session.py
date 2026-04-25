@@ -13,6 +13,7 @@ so adding it is a focused, narrow change.
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -23,9 +24,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 
-_sessionmaker: async_sessionmaker[AsyncSession] | None = None
-
-
+@lru_cache(maxsize=1)
 def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
     """Return the process-wide async sessionmaker.
 
@@ -35,14 +34,11 @@ def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
     Setting it to ``False`` means attributes loaded inside the transaction
     remain accessible after commit, which is what async code expects.
     """
-    global _sessionmaker
-    if _sessionmaker is None:
-        _sessionmaker = async_sessionmaker(
-            bind=get_engine(),
-            class_=AsyncSession,
-            expire_on_commit=False,
-        )
-    return _sessionmaker
+    return async_sessionmaker(
+        bind=get_engine(),
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
