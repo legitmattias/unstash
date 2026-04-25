@@ -7,9 +7,11 @@ Settings are loaded in this priority order (highest wins):
 3. Docker Compose secrets mounted at ``/run/secrets/``
 4. Field defaults
 
-For secrets, Pydantic Settings reads ``/run/secrets/<field_name>`` as the value.
-For example, field ``database_password`` is read from ``/run/secrets/database_password``.
-In tests, set ``UNSTASH_DATABASE_PASSWORD`` as an env var instead — no secrets dir needed.
+Secret fields use explicit ``alias=<field_name>`` to opt out of the
+``UNSTASH_`` env prefix mechanism. This means secret files are read from
+``/run/secrets/<field_name>`` (no prefix), keeping the file naming convention
+clean. In tests, pass values via constructor (``Settings(database_password=...)``)
+or point ``UNSTASH_SECRETS_DIR`` at a directory containing the expected files.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy import URL
 
 # Docker Compose mounts secrets here by default. Override via env var for tests
 # or non-Docker development.
@@ -57,16 +60,30 @@ class Settings(BaseSettings):
     database_port: int = Field(default=5432)
     database_name: str = Field(default="unstash")
     database_user: str = Field(default="unstash_app")
+    database_migrations_user: str = Field(default="unstash_migrations")
+    database_pool_size: int = Field(default=5, ge=1)
+    database_pool_max_overflow: int = Field(default=5, ge=0)
+    database_pool_timeout: int = Field(
+        default=30,
+        ge=1,
+        description="Seconds to wait for an available connection before raising.",
+    )
 
     # -- Secrets ---------------------------------------------------------------
-    # Loaded from /run/secrets/<field_name> in Docker, or UNSTASH_<FIELD_NAME>
-    # env var in tests.  Defaults are provided ONLY so the app can start in
-    # development without a full secrets setup — they must be overridden in
-    # staging and production.
+    # Loaded from /run/secrets/<field_name> via Pydantic Settings' secrets_dir
+    # source. Each field uses an explicit alias matching the secret file name —
+    # this opts the field out of the env_prefix mechanism, so the file name
+    # stays as plain ``database_password`` rather than ``UNSTASH_database_password``.
+    # In tests, pass values via constructor or set UNSTASH_SECRETS_DIR to a
+    # directory with the expected file names.
 
-    database_password: str = Field(default="")
-    session_secret: str = Field(default="")
-    encryption_key: str = Field(default="")
+    database_password: str = Field(default="", alias="database_password")
+    database_migrations_password: str = Field(
+        default="",
+        alias="database_migrations_password",
+    )
+    session_secret: str = Field(default="", alias="session_secret")
+    encryption_key: str = Field(default="", alias="encryption_key")
 
     # -- Redis -----------------------------------------------------------------
 
@@ -76,17 +93,37 @@ class Settings(BaseSettings):
     # -- External APIs ---------------------------------------------------------
     # Added when their respective features are implemented.
 
-    jina_api_key: str = Field(default="")
-    mistral_api_key: str = Field(default="")
+    jina_api_key: str = Field(default="", alias="jina_api_key")
+    mistral_api_key: str = Field(default="", alias="mistral_api_key")
 
     # -- Derived properties ----------------------------------------------------
 
     @property
-    def database_url(self) -> str:
-        """Async database URL for SQLAlchemy + asyncpg."""
-        return (
-            f"postgresql+asyncpg://{self.database_user}:{self.database_password}"
-            f"@{self.database_host}:{self.database_port}/{self.database_name}"
+    def database_url(self) -> URL:
+        """Async database URL for the application role (SQLAlchemy + asyncpg)."""
+        return self._build_db_url(
+            self.database_user,
+            self.database_password,
+            "postgresql+asyncpg",
+        )
+
+    @property
+    def database_migrations_url(self) -> URL:
+        """Sync database URL for the migrations role (used by Alembic)."""
+        return self._build_db_url(
+            self.database_migrations_user,
+            self.database_migrations_password,
+            "postgresql+psycopg",
+        )
+
+    def _build_db_url(self, user: str, password: str, driver: str) -> URL:
+        return URL.create(
+            drivername=driver,
+            username=user,
+            password=password,
+            host=self.database_host,
+            port=self.database_port,
+            database=self.database_name,
         )
 
     @property
