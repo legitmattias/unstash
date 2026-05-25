@@ -37,6 +37,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     CREATE EXTENSION IF NOT EXISTS vector;
     CREATE EXTENSION IF NOT EXISTS vectorscale CASCADE;
     CREATE EXTENSION IF NOT EXISTS pg_search;
+    CREATE EXTENSION IF NOT EXISTS citext;
 
     -- Migrations role: owns the schema, bypasses RLS, used only by Alembic.
     CREATE ROLE unstash_migrations
