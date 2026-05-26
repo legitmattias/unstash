@@ -10,10 +10,13 @@ services:
       target: dev
     volumes:
       - ./backend/src:/app/src:ro
+      - ./backend/alembic:/app/alembic:ro
+      - ./backend/alembic.ini:/app/alembic.ini:ro
     ports:
       - "127.0.0.1:8100:8000"
     secrets:
       - database_password
+      - database_migrations_password
       - session_secret
       - encryption_key
     environment:

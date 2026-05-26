@@ -13,6 +13,7 @@ from sqlalchemy import create_engine, pool
 
 from alembic import context
 from unstash.config import get_settings
+from unstash.db.models import Base
 
 # Alembic Config object — gives access to alembic.ini values.
 config = context.config
@@ -28,8 +29,9 @@ if config.config_file_name is not None:
 settings = get_settings()
 migrations_url = settings.database_migrations_url
 
-# Target metadata for autogenerate. Wired up when the first model lands.
-target_metadata = None
+# Target metadata for autogenerate. The models package imports every model
+# as a side effect, registering them with Base.metadata.
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
