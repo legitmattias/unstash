@@ -33,6 +33,31 @@ migrations_url = settings.database_migrations_url
 # as a side effect, registering them with Base.metadata.
 target_metadata = Base.metadata
 
+# Specialised indexes created by hand in migrations via raw SQL — their DDL
+# (pgvectorscale diskann access method, pg_search bm25 tokenizer casts) has no
+# SQLAlchemy expression, so they are absent from the model metadata.
+# Autogenerate would therefore see them as "extra" and emit drops. Exclude
+# them by name so future autogenerate runs leave them alone.
+_UNMANAGED_INDEXES = frozenset(
+    {
+        "ix_chunks_embedding_diskann",
+        "ix_chunks_text_bm25",
+    }
+)
+
+
+def _include_object(
+    obj: object,  # noqa: ARG001 — required by Alembic's callback signature
+    name: str | None,
+    type_: str,
+    reflected: bool,  # noqa: ARG001
+    compare_to: object,  # noqa: ARG001
+) -> bool:
+    """Tell autogenerate to ignore the hand-maintained specialised indexes."""
+    if type_ == "index" and name in _UNMANAGED_INDEXES:
+        return False
+    return True
+
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
@@ -45,6 +70,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_object=_include_object,
     )
 
     with context.begin_transaction():
@@ -56,7 +82,11 @@ def run_migrations_online() -> None:
     connectable = create_engine(migrations_url, poolclass=pool.NullPool)
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            include_object=_include_object,
+        )
 
         with context.begin_transaction():
             context.run_migrations()
