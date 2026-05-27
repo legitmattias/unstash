@@ -31,6 +31,7 @@ from unstash.db.models.base import Base, TimestampMixin
 
 if TYPE_CHECKING:
     from unstash.db.models.chunk import Chunk
+    from unstash.db.models.connector import Connector
 
 
 class DocumentStatus(enum.StrEnum):
@@ -80,9 +81,9 @@ class Document(Base, TimestampMixin):
         ForeignKey("organisations.id", ondelete="CASCADE"),
         nullable=False,
     )
-    # FK constraint to connectors added in migration 0003.
     connector_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
+        ForeignKey("connectors.id", ondelete="SET NULL"),
         nullable=True,
     )
     connector_resource_id: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -107,3 +108,4 @@ class Document(Base, TimestampMixin):
         back_populates="document",
         cascade="all, delete-orphan",
     )
+    connector: Mapped[Connector | None] = relationship(back_populates="documents")

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from unstash.db.models.base import Base, TimestampMixin
 from unstash.db.models.chunk import Chunk
+from unstash.db.models.connector import Connector, ConnectorProvider, ConnectorStatus
 from unstash.db.models.document import Document, DocumentStatus
 from unstash.db.models.org_membership import OrgMembership, OrgRole
 from unstash.db.models.organisation import Organisation
@@ -18,6 +19,9 @@ from unstash.db.models.user import User
 __all__ = [
     "Base",
     "Chunk",
+    "Connector",
+    "ConnectorProvider",
+    "ConnectorStatus",
     "Document",
     "DocumentStatus",
     "OrgMembership",
