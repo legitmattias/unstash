@@ -9,12 +9,17 @@ model isn't imported here, Alembic won't see it.
 from __future__ import annotations
 
 from unstash.db.models.base import Base, TimestampMixin
+from unstash.db.models.chunk import Chunk
+from unstash.db.models.document import Document, DocumentStatus
 from unstash.db.models.org_membership import OrgMembership, OrgRole
 from unstash.db.models.organisation import Organisation
 from unstash.db.models.user import User
 
 __all__ = [
     "Base",
+    "Chunk",
+    "Document",
+    "DocumentStatus",
     "OrgMembership",
     "OrgRole",
     "Organisation",
