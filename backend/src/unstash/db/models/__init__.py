@@ -14,6 +14,7 @@ from unstash.db.models.connector import Connector, ConnectorProvider, ConnectorS
 from unstash.db.models.document import Document, DocumentStatus
 from unstash.db.models.org_membership import OrgMembership, OrgRole
 from unstash.db.models.organisation import Organisation
+from unstash.db.models.search_log import SearchLog
 from unstash.db.models.user import User
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "OrgMembership",
     "OrgRole",
     "Organisation",
+    "SearchLog",
     "TimestampMixin",
     "User",
 ]
