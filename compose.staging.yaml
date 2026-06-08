@@ -1,14 +1,9 @@
-# Staging overrides — GHCR images tagged :staging, file-based secrets
-# mounted from the VPS filesystem, host ports offset from production
-# (8010/3510) for same-host coexistence, lower resource limits.
-#
-# Secrets live at /opt/unstash/secrets/staging/ on the VPS, owned by the
-# deploy user with restrictive directory permissions. CI never sees these
-# values — it only builds images and runs `docker compose up` on the remote
-# daemon, which bind-mounts the files into containers at /run/secrets/<name>.
+# Staging overrides — GHCR images tagged :staging, host ports 8010/3510 for same-host
+# coexistence with production, lower resource limits.
+# Secrets supplied by the host at $SECRETS_DIR; see ADR 0003.
 #
 # Usage (from CI):
-#   DOCKER_HOST=ssh://... docker compose -p unstash-staging \
+#   DOCKER_HOST=ssh://... SECRETS_DIR=... docker compose -p unstash-staging \
 #     -f compose.yaml -f compose.staging.yaml up -d
 
 services:
@@ -72,12 +67,12 @@ services:
 
 secrets:
   database_password:
-    file: /opt/unstash/secrets/staging/database_password
+    file: ${SECRETS_DIR:?SECRETS_DIR must point to the host directory holding the secret files}/database_password
   database_migrations_password:
-    file: /opt/unstash/secrets/staging/database_migrations_password
+    file: ${SECRETS_DIR}/database_migrations_password
   postgres_superuser_password:
-    file: /opt/unstash/secrets/staging/postgres_superuser_password
+    file: ${SECRETS_DIR}/postgres_superuser_password
   session_secret:
-    file: /opt/unstash/secrets/staging/session_secret
+    file: ${SECRETS_DIR}/session_secret
   encryption_key:
-    file: /opt/unstash/secrets/staging/encryption_key
+    file: ${SECRETS_DIR}/encryption_key
