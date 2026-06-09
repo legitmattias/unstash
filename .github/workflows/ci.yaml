@@ -164,6 +164,7 @@ jobs:
       - name: Validate compose config
         env:
           ORIGIN: http://ci-validation.local
+          SECRETS_DIR: /ci-validation/secrets
         run: |
           docker compose -f compose.yaml -f compose.dev.yaml config --quiet
           docker compose -f compose.yaml -f compose.staging.yaml config --quiet
