@@ -117,6 +117,7 @@ jobs:
           POSTGRES_IMAGE: ${{ env.POSTGRES_IMAGE }}
           IMAGE_TAG: ${{ github.sha }}
           ORIGIN: ${{ vars.ORIGIN }}
+          SECRETS_DIR: ${{ vars.SECRETS_DIR }}
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           docker compose -p unstash-staging -f compose.yaml -f compose.staging.yaml pull
@@ -160,6 +161,7 @@ jobs:
           POSTGRES_IMAGE: ${{ env.POSTGRES_IMAGE }}
           IMAGE_TAG: ${{ github.sha }}
           ORIGIN: ${{ vars.ORIGIN }}
+          SECRETS_DIR: ${{ vars.SECRETS_DIR }}
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           docker compose -p unstash-production -f compose.yaml -f compose.production.yaml pull
