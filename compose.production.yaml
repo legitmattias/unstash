@@ -1,13 +1,8 @@
-# Production overrides — GHCR images tagged :production, file-based secrets
-# mounted from the VPS filesystem, resource limits, restart policies.
-#
-# Secrets live at /opt/unstash/secrets/production/ on the VPS, owned by the
-# deploy user with restrictive directory permissions. CI never sees these
-# values — it only builds images and runs `docker compose up` on the remote
-# daemon, which bind-mounts the files into containers at /run/secrets/<name>.
+# Production overrides — GHCR images tagged :production, resource limits, restart policies.
+# Secrets supplied by the host at $SECRETS_DIR; see ADR 0003.
 #
 # Usage (from CI):
-#   DOCKER_HOST=ssh://... docker compose -p unstash-production \
+#   DOCKER_HOST=ssh://... SECRETS_DIR=... docker compose -p unstash-production \
 #     -f compose.yaml -f compose.production.yaml up -d
 
 services:
@@ -71,12 +66,12 @@ services:
 
 secrets:
   database_password:
-    file: /opt/unstash/secrets/production/database_password
+    file: ${SECRETS_DIR:?SECRETS_DIR must point to the host directory holding the secret files}/database_password
   database_migrations_password:
-    file: /opt/unstash/secrets/production/database_migrations_password
+    file: ${SECRETS_DIR}/database_migrations_password
   postgres_superuser_password:
-    file: /opt/unstash/secrets/production/postgres_superuser_password
+    file: ${SECRETS_DIR}/postgres_superuser_password
   session_secret:
-    file: /opt/unstash/secrets/production/session_secret
+    file: ${SECRETS_DIR}/session_secret
   encryption_key:
-    file: /opt/unstash/secrets/production/encryption_key
+    file: ${SECRETS_DIR}/encryption_key
