@@ -21,6 +21,13 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY backend/src ./src
 RUN uv sync --frozen --no-dev --no-editable
 
+# Alembic configuration and migration scripts. Needed at runtime so the
+# `alembic` command works inside the container. The dev compose file
+# bind-mounts these over the COPY'd versions so local edits are picked up
+# without a rebuild; runtime uses the COPY'd files as-is.
+COPY backend/alembic.ini ./alembic.ini
+COPY backend/alembic ./alembic
+
 # ---------------------------------------------------------------------------
 # Stage: dev — local development with hot reload
 # ---------------------------------------------------------------------------
@@ -43,6 +50,8 @@ RUN groupadd --system unstash && \
 WORKDIR /app
 
 COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/alembic.ini /app/alembic.ini
+COPY --from=builder /app/alembic /app/alembic
 
 ENV PATH="/app/.venv/bin:$PATH"
 
