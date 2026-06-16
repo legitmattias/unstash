@@ -12,6 +12,7 @@ services:
       - "127.0.0.1:8000:8000"
     secrets:
       - database_password
+      - database_migrations_password
       - session_secret
       - encryption_key
     environment:
