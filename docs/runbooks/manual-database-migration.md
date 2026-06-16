@@ -37,18 +37,23 @@ Should print the installed Alembic version. If the binary isn't found, the runti
 
 ### 2. Take a database backup
 
+Backups for manual migrations live under a per-environment directory in the operator's home so they don't accumulate at the top level. Create the directory the first time and then use it consistently:
+
 ```bash
+BACKUP_DIR=~/backups/unstash/<environment>
+mkdir -p "$BACKUP_DIR"
+
 docker exec <project>-postgres-1 pg_dump \
     -U unstash_migrations -d unstash \
     --format=custom --file=/tmp/pre-migration-backup.dump
 
 docker cp <project>-postgres-1:/tmp/pre-migration-backup.dump \
-    ~/pre-migration-backup-$(date +%F-%H%M).dump
+    "$BACKUP_DIR/pre-migration-$(date +%F-%H%M).dump"
 
-ls -lh ~/pre-migration-backup-*.dump
+ls -lh "$BACKUP_DIR/pre-migration-"*.dump
 ```
 
-Verify the file exists and the size is non-trivial. If the backup fails, **stop here** — do not migrate without a backup.
+`<environment>` is `staging` or `production` — match it to the project name the deploy workflow uses (`unstash-staging` or `unstash-production`). Verify the file exists and the size is non-trivial. If the backup fails, **stop here** — do not migrate without a backup.
 
 ### 3. Retro-fit the migrations role's CREATE-on-database grant (one-off per database)
 
@@ -72,11 +77,21 @@ docker exec -it <project>-postgres-1 psql -U postgres -d unstash \
 
 ### 4. Dry-run the upgrade
 
+Alembic's `--sql` mode generates *static* SQL — it does not consult the database for the current revision, it emits the full chain starting from base. That's noisy when only the last one or two migrations need to apply.
+
+To inspect just the SQL that would actually run, supply an explicit range `<from>:head`, where `<from>` is the current revision shown in step 5 below (or `base` for an empty database):
+
+```bash
+docker exec <project>-api-1 alembic upgrade <current-revision>:head --sql | less
+```
+
+If you don't yet know the current revision, the static form is still useful — just scroll to the bottom for the incremental tail:
+
 ```bash
 docker exec <project>-api-1 alembic upgrade head --sql | less
 ```
 
-Read the SQL Alembic would execute. Expect `CREATE TABLE`, `CREATE INDEX`, `ALTER TABLE`, `INSERT INTO alembic_version` for each pending migration. If anything looks unexpected — a `DROP TABLE` you did not author, an `ALTER` that suggests data loss — stop and investigate before applying.
+Either way, expect `CREATE TABLE`, `CREATE INDEX`, `ALTER TABLE`, `INSERT INTO alembic_version` for each pending migration. If anything looks unexpected — a `DROP TABLE` you did not author, an `ALTER` that suggests data loss — stop and investigate before applying.
 
 ### 5. Check the current revision
 
@@ -137,7 +152,7 @@ docker exec <project>-api-1 alembic downgrade <previous-revision>
 If the migration chain is corrupt (mismatched expectations), restore the backup from step 2:
 
 ```bash
-docker cp ~/pre-migration-backup-<timestamp>.dump \
+docker cp ~/backups/unstash/<environment>/pre-migration-<timestamp>.dump \
     <project>-postgres-1:/tmp/restore.dump
 
 docker exec <project>-postgres-1 pg_restore \
