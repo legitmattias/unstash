@@ -9,6 +9,7 @@ Runbooks are written during development when the relevant code is fresh, and upd
 Written:
 
 - `vps-maintenance.md` — shared VPS operations: tier upgrades, volume management, OS patching, reboots, common stuck states.
+- `manual-database-migration.md` — applying pending Alembic migrations to a deployed database (until the deploy workflow does it automatically).
 
 Planned (added as the relevant components are implemented):
 

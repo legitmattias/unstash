@@ -61,6 +61,14 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     -- CREATE / ALTER / DROP objects. The application role cannot alter the schema.
     ALTER SCHEMA public OWNER TO unstash_migrations;
 
+    -- Allow the migrations role to install trusted extensions itself.
+    -- Without this grant, CREATE EXTENSION IF NOT EXISTS in a migration fails
+    -- (the existence check is gated by privilege, even for trusted extensions
+    -- like citext and pg_trgm that are user-installable since PostgreSQL 13).
+    -- Without this, every new extension dependency would require a one-off
+    -- superuser intervention on every database the migration runs against.
+    GRANT CREATE ON DATABASE ${POSTGRES_DB} TO unstash_migrations;
+
     -- Application role can connect to the database and USE the schema but not
     -- modify it.
     GRANT CONNECT ON DATABASE ${POSTGRES_DB} TO unstash_app;
