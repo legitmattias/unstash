@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -63,10 +63,39 @@ def create_app() -> FastAPI:
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
-        """Liveness probe — returns OK if the process is running."""
+        """Liveness probe — returns OK if the process is running.
+
+        Intentionally does NOT touch the database. Process-level supervisors
+        (Docker, the orchestrator) use this to decide whether to restart the
+        container. A failing database should not cause container restarts; a
+        crashed Python process should.
+        """
         return {"status": "ok", "version": __version__}
 
+    @app.get("/api/ready")
+    async def ready() -> dict[str, str]:
+        """Readiness probe — returns OK if the app can serve traffic now.
+
+        Pings the database via the connection pool. Returns 503 if the
+        database is unreachable so external health checks (CI deploy checks,
+        load balancers) stop sending traffic until the dependency recovers.
+        """
+        try:
+            engine = get_engine()
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+        except Exception as exc:
+            # Probe is by design permissive — any failure should report
+            # "not ready" rather than propagate as a 500.
+            logger.warning("readiness_check_failed", error=str(exc))
+            raise HTTPException(
+                status_code=503,
+                detail={"status": "not ready"},
+            ) from exc
+        return {"status": "ready", "version": __version__}
+
     _ = health  # Prevent pyright reportUnusedFunction — registered by decorator
+    _ = ready
 
     return app
 
