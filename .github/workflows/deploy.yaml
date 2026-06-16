@@ -128,7 +128,7 @@ jobs:
           echo "Waiting for services to start..."
           sleep 10
           ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
-            'curl -sf http://localhost:8010/api/health || (echo "API health check failed" && exit 1)'
+            'curl -sf http://localhost:8010/api/ready || (echo "API readiness check failed" && exit 1)'
           echo "Staging deploy complete."
 
   # ── Deploy to production (auto on push to main) ──────────
@@ -172,5 +172,5 @@ jobs:
           echo "Waiting for services to start..."
           sleep 10
           ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
-            'curl -sf http://localhost:8000/api/health || (echo "API health check failed" && exit 1)'
+            'curl -sf http://localhost:8000/api/ready || (echo "API readiness check failed" && exit 1)'
           echo "Production deploy complete."
