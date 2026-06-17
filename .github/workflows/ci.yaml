@@ -177,6 +177,111 @@ jobs:
         run: docker build -f docker/frontend.Dockerfile --target runtime -t unstash-frontend:ci .
 
   # ---------------------------------------------------------------------------
+  # Runtime smoke test: prove the runtime image can apply migrations end-to-end
+  # against a fresh postgres bootstrapped by init-db.sh. Closes the bug class
+  # that surfaced during the M2 Phase B production migration — runtime paths
+  # that work in dev compose but fail in production runtime configuration.
+  # ---------------------------------------------------------------------------
+  runtime-migration-smoke:
+    name: Runtime migration smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build postgres image
+        run: docker build -f docker/postgres.Dockerfile -t unstash-postgres:ci .
+
+      - name: Build api runtime image
+        run: docker build -f docker/backend.Dockerfile --target runtime -t unstash-api:ci .
+
+      - name: Generate placeholder secrets
+        run: |
+          SECRETS_DIR=$(mktemp -d)
+          echo "SECRETS_DIR=$SECRETS_DIR" >> "$GITHUB_ENV"
+          for name in database_password database_migrations_password postgres_superuser_password session_secret encryption_key; do
+            openssl rand -base64 32 | tr -d '\n' > "$SECRETS_DIR/$name"
+          done
+          ls -la "$SECRETS_DIR"
+
+      - name: Bring up postgres + api
+        run: |
+          docker compose \
+            -f compose.yaml -f compose.ci-smoke.yaml \
+            -p unstash-ci-smoke \
+            up -d postgres api
+
+      - name: Wait for api to become healthy
+        run: |
+          for i in $(seq 1 30); do
+            status=$(docker inspect unstash-ci-smoke-api-1 --format '{{.State.Health.Status}}' 2>/dev/null || echo "missing")
+            echo "[attempt $i] api status: $status"
+            if [ "$status" = "healthy" ]; then
+              echo "::notice::api healthy — startup checks passed against runtime image + fresh postgres"
+              exit 0
+            fi
+            if [ "$status" = "unhealthy" ]; then
+              echo "::error::api became unhealthy"
+              break
+            fi
+            sleep 5
+          done
+          echo "::error::api did not become healthy within timeout"
+          docker logs unstash-ci-smoke-api-1
+          exit 1
+
+      - name: Apply migrations via alembic
+        run: |
+          docker compose \
+            -f compose.yaml -f compose.ci-smoke.yaml \
+            -p unstash-ci-smoke \
+            exec -T api alembic upgrade head
+
+      - name: Verify alembic at head
+        run: |
+          output=$(docker compose \
+            -f compose.yaml -f compose.ci-smoke.yaml \
+            -p unstash-ci-smoke \
+            exec -T api alembic current)
+          echo "$output"
+          if ! echo "$output" | grep -q '(head)'; then
+            echo "::error::alembic current does not show (head)"
+            exit 1
+          fi
+
+      - name: Verify schema has expected tables
+        run: |
+          count=$(docker compose \
+            -f compose.yaml -f compose.ci-smoke.yaml \
+            -p unstash-ci-smoke \
+            exec -T postgres \
+            psql -U unstash_migrations -d unstash -tAc \
+            "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'" | tr -d '[:space:]')
+          echo "Schema table count: $count"
+          if [ "$count" -lt 10 ]; then
+            echo "::error::Expected at least 10 tables, got $count"
+            exit 1
+          fi
+
+      - name: Verify startup_check log lines fired
+        run: |
+          logs=$(docker logs unstash-ci-smoke-api-1 2>&1)
+          for check in secrets_loadable not_superuser required_extensions; do
+            if ! echo "$logs" | grep -q "startup_check_passed.*$check"; then
+              echo "::error::startup_check_passed log line not found for: $check"
+              exit 1
+            fi
+          done
+          echo "::notice::all three startup checks logged as passed"
+
+      - name: Tear down
+        if: always()
+        run: |
+          docker compose \
+            -f compose.yaml -f compose.ci-smoke.yaml \
+            -p unstash-ci-smoke \
+            down -v || true
+
+  # ---------------------------------------------------------------------------
   # Security: secrets scanning
   # ---------------------------------------------------------------------------
   security-scan:
