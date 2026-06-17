@@ -39,7 +39,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     3. Not-superuser and required-extensions — confirm the role and
        database state required for RLS and our schema actually hold.
 
-    Each check raises ``StartupCheckFailed`` with an actionable message on
+    Each check raises ``StartupCheckError`` with an actionable message on
     failure; FastAPI propagates that as a startup error, the container exits
     non-zero, and the deploy workflow's post-deploy ``/api/ready`` probe
     sees the failed container instead of marking the deploy successful.

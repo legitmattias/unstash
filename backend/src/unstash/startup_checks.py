@@ -1,17 +1,10 @@
-"""Startup-time validations that should fail loudly if anything's wrong.
+"""Startup-time configuration validations.
 
 Each check is called from the FastAPI lifespan handler. A failed check
 raises ``StartupCheckError`` with a clear, actionable message; FastAPI
 propagates that as a startup error, the container exits non-zero, and the
 deploy workflow's post-deploy ``/api/ready`` probe sees a failed
 container instead of marking the deploy successful.
-
-The checks exist because we've been bitten by the inverse pattern:
-configuration that *would* have failed at runtime instead silently
-defaulted to an empty value, and the failure surfaced later in a less
-diagnosable way. See PR #16 (database_migrations_password silently missing
-from staging/production compose) and the M2 Phase B journal for the
-canonical example.
 """
 
 from __future__ import annotations
@@ -36,9 +29,7 @@ class StartupCheckError(RuntimeError):
 # Secrets that the application must have loaded at startup. Listed explicitly
 # (rather than discovered via the alias-field convention) so that adding a new
 # secret to ``config.Settings`` is a deliberate two-step: declare the field,
-# then add it here. The check fires for every secret in this list, regardless
-# of whether the corresponding feature is wired up yet — the point is to catch
-# missing secrets *before* the feature that uses them ships.
+# then add it here.
 REQUIRED_SECRETS: tuple[str, ...] = (
     "database_password",
     "database_migrations_password",
@@ -89,11 +80,8 @@ def check_secrets_loadable(settings: Settings) -> None:
 async def check_not_superuser(conn: AsyncConnection) -> None:
     """Confirm the application is not connected as a Postgres superuser.
 
-    Superusers bypass Row-Level Security unconditionally. If the application
-    role were ever (mis)configured with SUPERUSER, RLS would silently do
-    nothing and tenant isolation would collapse. This check is paranoid in
-    intent — the role config in ``init-db.sh`` is explicit NOSUPERUSER — but
-    that paranoia is the point.
+    Superusers bypass Row-Level Security unconditionally; a superuser
+    application role would silently disable multi-tenant isolation.
     """
     result = await conn.execute(text("SELECT current_setting('is_superuser')"))
     value = result.scalar_one()
@@ -112,12 +100,9 @@ async def check_not_superuser(conn: AsyncConnection) -> None:
 async def check_required_extensions(conn: AsyncConnection) -> None:
     """Confirm every required Postgres extension is installed in the database.
 
-    Extensions are installed at first boot by ``docker/init-db.sh`` and are
-    referenced from migrations via CREATE EXTENSION IF NOT EXISTS. If a fresh
-    database somehow shipped without them — wrong image, init-db.sh skipped,
-    extension dropped manually — queries that depend on them will fail with
-    obscure errors deep in the call stack. This check converts that into a
-    loud startup failure naming exactly which extensions are missing.
+    Extensions are installed at first boot by ``docker/init-db.sh``.
+    Migrations reference them via CREATE EXTENSION IF NOT EXISTS but rely
+    on init-db.sh having run successfully.
     """
     result = await conn.execute(
         text("SELECT extname FROM pg_extension WHERE extname = ANY(:names)"),
