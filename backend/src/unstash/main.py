@@ -17,13 +17,33 @@ from unstash.__about__ import __version__
 from unstash.config import get_settings
 from unstash.db import dispose_engine, get_engine
 from unstash.logging import setup_logging
+from unstash.startup_checks import (
+    check_not_superuser,
+    check_required_extensions,
+    check_secrets_loadable,
+)
 
 logger = structlog.get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Application lifespan — startup and shutdown hooks."""
+    """Application lifespan — startup and shutdown hooks.
+
+    Startup runs three configuration sanity checks in order:
+
+    1. Secret-loadability — fails before any DB call so a missing
+       database_password produces a clear message rather than an opaque
+       authentication failure.
+    2. Database connectivity — confirms the engine can reach Postgres.
+    3. Not-superuser and required-extensions — confirm the role and
+       database state required for RLS and our schema actually hold.
+
+    Each check raises ``StartupCheckFailed`` with an actionable message on
+    failure; FastAPI propagates that as a startup error, the container exits
+    non-zero, and the deploy workflow's post-deploy ``/api/ready`` probe
+    sees the failed container instead of marking the deploy successful.
+    """
     settings = get_settings()
     setup_logging(settings)
 
@@ -33,12 +53,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         version=__version__,
     )
 
-    # Open a connection on startup to fail fast if the database is unreachable
-    # or the configured user can't authenticate. Without this, errors only
-    # surface on the first request.
+    check_secrets_loadable(settings)
+
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.execute(text("SELECT 1"))
+        await check_not_superuser(conn)
+        await check_required_extensions(conn)
 
     try:
         yield
