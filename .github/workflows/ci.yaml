@@ -178,9 +178,7 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Runtime smoke test: prove the runtime image can apply migrations end-to-end
-  # against a fresh postgres bootstrapped by init-db.sh. Closes the bug class
-  # that surfaced during the M2 Phase B production migration — runtime paths
-  # that work in dev compose but fail in production runtime configuration.
+  # against a fresh postgres bootstrapped by init-db.sh.
   # ---------------------------------------------------------------------------
   runtime-migration-smoke:
     name: Runtime migration smoke

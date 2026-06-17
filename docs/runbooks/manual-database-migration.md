@@ -57,9 +57,9 @@ ls -lh "$BACKUP_DIR/pre-migration-"*.dump
 
 ### 3. Retro-fit the migrations role's CREATE-on-database grant (one-off per database)
 
-Databases initialised before this runbook landed do not have `GRANT CREATE ON DATABASE unstash TO unstash_migrations` from `init-db.sh`. Without it, `CREATE EXTENSION IF NOT EXISTS` in migrations fails on databases where the extension does not already exist.
+If the database was initialised by an `init-db.sh` that did not include `GRANT CREATE ON DATABASE unstash TO unstash_migrations`, run the grant manually. Without it, `CREATE EXTENSION IF NOT EXISTS` in migrations fails on databases where the extension does not already exist.
 
-Run once per database. Idempotent:
+Idempotent; safe to run on databases that already have the grant:
 
 ```bash
 docker exec <project>-postgres-1 psql -U postgres -d unstash -c \
