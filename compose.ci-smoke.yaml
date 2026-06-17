@@ -1,0 +1,57 @@
+# CI smoke test overrides.
+#
+# Brings up the custom postgres image and the runtime api image with
+# placeholder secrets from $SECRETS_DIR, so the CI smoke job can verify that
+# `alembic upgrade head` runs cleanly inside the runtime container and the
+# startup checks pass against a fresh init-db.sh-bootstrapped database.
+#
+# This file mirrors production's shape — custom postgres, file-based secrets
+# from $SECRETS_DIR — without environment-specific concerns (ports, resource
+# limits, restart policies).
+#
+# Usage from the CI job:
+#   SECRETS_DIR=/tmp/secrets docker compose \
+#     -f compose.yaml -f compose.ci-smoke.yaml \
+#     -p unstash-ci-smoke up -d postgres api
+
+services:
+  # Frontend is not exercised by the smoke test, but compose validates every
+  # service in the project. The base compose.yaml leaves frontend's image
+  # unset (it's specified in each env-specific override). Set a trivial
+  # placeholder so the project validates; never actually started.
+  frontend:
+    image: busybox
+
+  api:
+    image: unstash-api:ci
+    secrets:
+      - database_password
+      - database_migrations_password
+      - session_secret
+      - encryption_key
+    environment:
+      UNSTASH_ENVIRONMENT: ci
+      UNSTASH_DEBUG: "false"
+      UNSTASH_LOG_LEVEL: INFO
+
+  postgres:
+    image: unstash-postgres:ci
+    secrets:
+      - database_password
+      - database_migrations_password
+      - postgres_superuser_password
+    environment:
+      POSTGRES_DB: unstash
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_superuser_password
+
+secrets:
+  database_password:
+    file: ${SECRETS_DIR:?SECRETS_DIR must point to a directory containing the placeholder secret files}/database_password
+  database_migrations_password:
+    file: ${SECRETS_DIR}/database_migrations_password
+  postgres_superuser_password:
+    file: ${SECRETS_DIR}/postgres_superuser_password
+  session_secret:
+    file: ${SECRETS_DIR}/session_secret
+  encryption_key:
+    file: ${SECRETS_DIR}/encryption_key
