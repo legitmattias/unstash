@@ -85,7 +85,7 @@ jobs:
       - run: uv sync --frozen
 
       - name: Pytest
-        run: uv run pytest --cov-report=xml
+        run: uv run pytest tests --ignore=tests/integration --cov-report=xml
 
       - name: Upload coverage
         if: github.event_name == 'pull_request'
@@ -279,6 +279,36 @@ jobs:
             -f compose.yaml -f compose.ci-smoke.yaml \
             -p unstash-ci-smoke \
             down -v || true
+
+  # ---------------------------------------------------------------------------
+  # Integration tests: pytest suite that uses testcontainers to spin up a real
+  # postgres with init-db.sh and runs adversarial RLS + migration roundtrip
+  # tests against it.
+  # ---------------------------------------------------------------------------
+  backend-integration-test:
+    name: Backend integration test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build postgres image (required by testcontainers fixture)
+        run: docker build -f docker/postgres.Dockerfile -t unstash-postgres:ci .
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: Run integration tests
+        working-directory: backend
+        run: uv run pytest tests/integration --no-cov
 
   # ---------------------------------------------------------------------------
   # Security: secrets scanning
