@@ -265,8 +265,9 @@ jobs:
       - name: Verify startup_check log lines fired
         run: |
           logs=$(docker logs unstash-ci-smoke-api-1 2>&1)
+          echo "$logs" | grep "startup_check_passed" || true
           for check in secrets_loadable not_superuser required_extensions; do
-            if ! echo "$logs" | grep -q "startup_check_passed.*$check"; then
+            if ! echo "$logs" | grep "startup_check_passed" | grep -q "$check"; then
               echo "::error::startup_check_passed log line not found for: $check"
               exit 1
             fi
