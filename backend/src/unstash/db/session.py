@@ -57,3 +57,20 @@ async def get_session() -> AsyncIterator[AsyncSession]:
     sessionmaker = get_sessionmaker()
     async with sessionmaker() as session, session.begin():
         yield session
+
+
+async def get_session_unmanaged() -> AsyncIterator[AsyncSession]:
+    """Like get_session, but without an enclosing transaction.
+
+    For consumers that manage their own commits — notably FastAPI-Users'
+    database adapters, which call ``session.commit()`` directly inside the
+    request handler. Wrapping such a consumer in our own ``session.begin()``
+    causes ``Can't operate on closed transaction inside context manager``.
+
+    Routes that do not need an enclosing transaction (auth, future admin)
+    use this dependency. Org-scoped routes that need RLS context will use
+    a transaction-wrapping variant added in M2.5-A PR 3.
+    """
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        yield session

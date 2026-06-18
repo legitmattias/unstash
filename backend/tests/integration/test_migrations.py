@@ -49,6 +49,7 @@ async def test_upgrade_head_produces_expected_table_set(
 ) -> None:
     """After the fixture's upgrade head, exactly the expected tables exist."""
     expected = {
+        "access_tokens",
         "alembic_version",
         "audit_log",
         "chunks",
