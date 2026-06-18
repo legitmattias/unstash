@@ -21,6 +21,7 @@ from unstash.config import get_settings
 from unstash.db import dispose_engine, get_engine
 from unstash.db.models import User
 from unstash.logging import setup_logging
+from unstash.orgs import orgs_router
 from unstash.startup_checks import (
     check_not_superuser,
     check_required_extensions,
@@ -140,6 +141,12 @@ def create_app() -> FastAPI:
         admin_router,
         prefix="/api/admin",
         tags=["admin"],
+    )
+
+    app.include_router(
+        orgs_router,
+        prefix="/api",
+        tags=["orgs"],
     )
 
     return app
