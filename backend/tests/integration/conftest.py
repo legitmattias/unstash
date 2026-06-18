@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 # Generated once per test process; no literal for secret scanners to match.
 TEST_APP_PASSWORD = secrets.token_urlsafe(16)
 TEST_MIGRATIONS_PASSWORD = secrets.token_urlsafe(16)
+TEST_ADMIN_PASSWORD = secrets.token_urlsafe(16)
 TEST_BOOTSTRAP_PASSWORD = secrets.token_urlsafe(16)
 
 
@@ -54,6 +55,7 @@ def postgres_container() -> Iterator[PostgresContainer]:
         )
         .with_env("UNSTASH_APP_DB_PASSWORD", TEST_APP_PASSWORD)
         .with_env("UNSTASH_MIGRATIONS_DB_PASSWORD", TEST_MIGRATIONS_PASSWORD)
+        .with_env("UNSTASH_ADMIN_DB_PASSWORD", TEST_ADMIN_PASSWORD)
     )
     container.start()
     try:
@@ -83,6 +85,7 @@ def _set_env_to_container(
     monkeypatch.setenv("UNSTASH_DATABASE_MIGRATIONS_USER", "unstash_migrations")
     monkeypatch.setenv("database_password", TEST_APP_PASSWORD)
     monkeypatch.setenv("database_migrations_password", TEST_MIGRATIONS_PASSWORD)
+    monkeypatch.setenv("database_admin_password", TEST_ADMIN_PASSWORD)
     monkeypatch.setenv("session_secret", "test_session_secret")
     monkeypatch.setenv("encryption_key", "test_encryption_key")
     get_settings.cache_clear()

@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     database_name: str = Field(default="unstash")
     database_user: str = Field(default="unstash_app")
     database_migrations_user: str = Field(default="unstash_migrations")
+    database_admin_user: str = Field(default="unstash_admin")
     database_pool_size: int = Field(default=5, ge=1)
     database_pool_max_overflow: int = Field(default=5, ge=0)
     database_pool_timeout: int = Field(
@@ -81,6 +82,10 @@ class Settings(BaseSettings):
     database_migrations_password: str = Field(
         default="",
         alias="database_migrations_password",
+    )
+    database_admin_password: str = Field(
+        default="",
+        alias="database_admin_password",
     )
     session_secret: str = Field(default="", alias="session_secret")
     encryption_key: str = Field(default="", alias="encryption_key")
@@ -114,6 +119,15 @@ class Settings(BaseSettings):
             self.database_migrations_user,
             self.database_migrations_password,
             "postgresql+psycopg",
+        )
+
+    @property
+    def database_admin_url(self) -> URL:
+        """Async database URL for the admin role (BYPASSRLS, superuser routes only)."""
+        return self._build_db_url(
+            self.database_admin_user,
+            self.database_admin_password,
+            "postgresql+asyncpg",
         )
 
     def _build_db_url(self, user: str, password: str, driver: str) -> URL:

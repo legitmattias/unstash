@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from unstash.db.engine import get_engine
+from unstash.db.engine import get_admin_engine, get_engine
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -36,6 +36,20 @@ def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
     """
     return async_sessionmaker(
         bind=get_engine(),
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+
+@lru_cache(maxsize=1)
+def get_admin_sessionmaker() -> async_sessionmaker[AsyncSession]:
+    """Return the process-wide async sessionmaker for the admin engine.
+
+    Bound to the ``unstash_admin`` role (BYPASSRLS). Used exclusively by
+    superuser-gated routes in ``unstash.admin``. See ``get_admin_engine``.
+    """
+    return async_sessionmaker(
+        bind=get_admin_engine(),
         class_=AsyncSession,
         expire_on_commit=False,
     )
@@ -67,10 +81,23 @@ async def get_session_unmanaged() -> AsyncIterator[AsyncSession]:
     request handler. Wrapping such a consumer in our own ``session.begin()``
     causes ``Can't operate on closed transaction inside context manager``.
 
-    Routes that do not need an enclosing transaction (auth, future admin)
-    use this dependency. Org-scoped routes that need RLS context will use
-    a transaction-wrapping variant added in M2.5-A PR 3.
+    Routes that do not need an enclosing transaction (auth) use this
+    dependency. Org-scoped routes that need RLS context will use a
+    transaction-wrapping variant added in M2.5-A PR 3.
     """
     sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        yield session
+
+
+async def get_admin_session() -> AsyncIterator[AsyncSession]:
+    """FastAPI dependency yielding an admin-engine session, no enclosing transaction.
+
+    The admin engine is bound to ``unstash_admin`` (BYPASSRLS). Routes that
+    use this dependency must be gated by superuser checks at the application
+    layer — never expose this dependency on a route a non-superuser can
+    reach. The handler is responsible for committing or rolling back.
+    """
+    sessionmaker = get_admin_sessionmaker()
     async with sessionmaker() as session:
         yield session
