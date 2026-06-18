@@ -8,11 +8,15 @@ from typing import TYPE_CHECKING
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from tests.integration.conftest import TEST_APP_PASSWORD, TEST_MIGRATIONS_PASSWORD
+from tests.integration.conftest import (
+    TEST_ADMIN_PASSWORD,
+    TEST_APP_PASSWORD,
+    TEST_MIGRATIONS_PASSWORD,
+)
 from unstash.auth.manager import _password_helper
 from unstash.config import get_settings
-from unstash.db.engine import dispose_engine, get_engine
-from unstash.db.session import get_sessionmaker
+from unstash.db.engine import dispose_engine, get_admin_engine, get_engine
+from unstash.db.session import get_admin_sessionmaker, get_sessionmaker
 from unstash.main import create_app
 
 if TYPE_CHECKING:
@@ -53,6 +57,7 @@ async def client(
     monkeypatch.setenv("UNSTASH_DATABASE_USER", "unstash_app")
     monkeypatch.setenv("database_password", TEST_APP_PASSWORD)
     monkeypatch.setenv("database_migrations_password", TEST_MIGRATIONS_PASSWORD)
+    monkeypatch.setenv("database_admin_password", TEST_ADMIN_PASSWORD)
     monkeypatch.setenv("session_secret", uuid.uuid4().hex)
     monkeypatch.setenv("encryption_key", uuid.uuid4().hex)
     monkeypatch.setenv("UNSTASH_ENVIRONMENT", "test")
@@ -61,7 +66,9 @@ async def client(
     # the current test's event loop. Otherwise asyncpg complains that its
     # futures are attached to a different loop.
     get_engine.cache_clear()
+    get_admin_engine.cache_clear()
     get_sessionmaker.cache_clear()
+    get_admin_sessionmaker.cache_clear()
 
     app = create_app()
     transport = ASGITransport(app=app)

@@ -157,7 +157,7 @@ jobs:
       - name: Create placeholder secrets for config validation
         run: |
           mkdir -p secrets
-          for f in database_password database_migrations_password postgres_superuser_password session_secret encryption_key; do
+          for f in database_password database_migrations_password database_admin_password postgres_superuser_password session_secret encryption_key; do
             echo "ci-placeholder" > "secrets/${f}.txt"
           done
 
@@ -196,7 +196,7 @@ jobs:
         run: |
           SECRETS_DIR=$(mktemp -d)
           echo "SECRETS_DIR=$SECRETS_DIR" >> "$GITHUB_ENV"
-          for name in database_password database_migrations_password postgres_superuser_password session_secret encryption_key; do
+          for name in database_password database_migrations_password database_admin_password postgres_superuser_password session_secret encryption_key; do
             openssl rand -base64 32 | tr -d '\n' > "$SECRETS_DIR/$name"
           done
           ls -la "$SECRETS_DIR"

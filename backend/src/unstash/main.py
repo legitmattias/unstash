@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 from sqlalchemy import text
 
 from unstash.__about__ import __version__
+from unstash.admin import admin_router
 from unstash.auth import auth_backend, current_active_user, fastapi_users
 from unstash.auth.schemas import UserRead
 from unstash.config import get_settings
@@ -133,6 +134,12 @@ def create_app() -> FastAPI:
         fastapi_users.get_auth_router(auth_backend),
         prefix="/api/auth",
         tags=["auth"],
+    )
+
+    app.include_router(
+        admin_router,
+        prefix="/api/admin",
+        tags=["admin"],
     )
 
     return app
