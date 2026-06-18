@@ -14,6 +14,7 @@ services:
     secrets:
       - database_password
       - database_migrations_password
+      - database_admin_password
       - session_secret
       - encryption_key
     environment:
@@ -47,6 +48,7 @@ services:
     secrets:
       - database_password
       - database_migrations_password
+      - database_admin_password
       - postgres_superuser_password
     environment:
       POSTGRES_DB: unstash
@@ -71,6 +73,8 @@ secrets:
     file: ${SECRETS_DIR:?SECRETS_DIR must point to the host directory holding the secret files}/database_password
   database_migrations_password:
     file: ${SECRETS_DIR}/database_migrations_password
+  database_admin_password:
+    file: ${SECRETS_DIR}/database_admin_password
   postgres_superuser_password:
     file: ${SECRETS_DIR}/postgres_superuser_password
   session_secret:

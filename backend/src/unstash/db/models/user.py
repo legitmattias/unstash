@@ -28,10 +28,16 @@ if TYPE_CHECKING:
 class User(Base, TimestampMixin):
     """A platform user.
 
-    Authentication is handled by FastAPI-Users at M4; this model defines
-    the schema that auth wiring will attach to. ``is_superuser`` denotes
-    platform-level admin (rare — for operator use only), not org-level
-    admin which is a membership role.
+    Authentication is handled by FastAPI-Users; this model defines the
+    schema that auth wiring attaches to. ``is_superuser`` denotes
+    platform-level admin (operator use only), not org-level admin —
+    which is a membership role.
+
+    The column set mirrors ``fastapi_users_db_sqlalchemy``'s
+    ``SQLAlchemyBaseUserTableUUID``. We do not inherit from it because
+    its declared types (plain ``str``, ``bool``) under ``TYPE_CHECKING``
+    conflict with our ``Mapped[T]`` columns, producing many spurious
+    pyright override warnings. The protocol is satisfied structurally.
     """
 
     __tablename__ = "users"

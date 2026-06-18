@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
 import structlog
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -14,14 +14,20 @@ if TYPE_CHECKING:
 from sqlalchemy import text
 
 from unstash.__about__ import __version__
+from unstash.admin import admin_router
+from unstash.auth import auth_backend, current_active_user, fastapi_users
+from unstash.auth.schemas import UserRead
 from unstash.config import get_settings
 from unstash.db import dispose_engine, get_engine
+from unstash.db.models import User
 from unstash.logging import setup_logging
 from unstash.startup_checks import (
     check_not_superuser,
     check_required_extensions,
     check_secrets_loadable,
 )
+
+CurrentUser = Annotated[User, Depends(current_active_user)]
 
 logger = structlog.get_logger(__name__)
 
@@ -115,8 +121,26 @@ def create_app() -> FastAPI:
             ) from exc
         return {"status": "ready", "version": __version__}
 
+    @app.get("/api/auth/me", response_model=UserRead)
+    async def me(user: CurrentUser) -> User:
+        """Return the authenticated user's identity."""
+        return user
+
     _ = health  # Prevent pyright reportUnusedFunction — registered by decorator
     _ = ready
+    _ = me
+
+    app.include_router(
+        fastapi_users.get_auth_router(auth_backend),
+        prefix="/api/auth",
+        tags=["auth"],
+    )
+
+    app.include_router(
+        admin_router,
+        prefix="/api/admin",
+        tags=["admin"],
+    )
 
     return app
 
