@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, text
 
-from unstash.auth.dependencies import current_active_user
+from unstash.auth.dependencies import current_user_or_token
 from unstash.db.models import Organisation, OrgMembership, User
 from unstash.db.session import get_sessionmaker
 from unstash.orgs.schemas import MembershipRead
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 
-CurrentUserDep = Annotated[User, Depends(current_active_user)]
+CurrentUserDep = Annotated[User, Depends(current_user_or_token)]
 
 
 async def get_org_scoped_session(

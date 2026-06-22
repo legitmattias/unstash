@@ -15,7 +15,8 @@ from sqlalchemy import text
 
 from unstash.__about__ import __version__
 from unstash.admin import admin_router
-from unstash.auth import auth_backend, current_active_user, fastapi_users
+from unstash.auth import auth_backend, fastapi_users
+from unstash.auth.dependencies import current_user_or_token
 from unstash.auth.schemas import UserRead
 from unstash.config import get_settings
 from unstash.db import dispose_engine, get_engine
@@ -28,7 +29,7 @@ from unstash.startup_checks import (
     check_secrets_loadable,
 )
 
-CurrentUser = Annotated[User, Depends(current_active_user)]
+CurrentUser = Annotated[User, Depends(current_user_or_token)]
 
 logger = structlog.get_logger(__name__)
 
