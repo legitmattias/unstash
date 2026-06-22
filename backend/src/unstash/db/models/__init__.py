@@ -9,6 +9,7 @@ model isn't imported here, Alembic won't see it.
 from __future__ import annotations
 
 from unstash.db.models.access_token import AccessToken
+from unstash.db.models.api_token import ApiToken
 from unstash.db.models.audit_log import AuditLog
 from unstash.db.models.base import Base, TimestampMixin
 from unstash.db.models.chunk import Chunk
@@ -22,6 +23,7 @@ from unstash.db.models.user import User
 
 __all__ = [
     "AccessToken",
+    "ApiToken",
     "AuditLog",
     "Base",
     "Chunk",

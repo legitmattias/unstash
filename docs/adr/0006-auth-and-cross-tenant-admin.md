@@ -93,6 +93,47 @@ For fresh databases (local dev, CI), `init-db.sh` handles everything and the mig
 
 `database_admin_password` follows the same rotation cadence as the other database role credentials: a runbook at `docs/runbooks/rotate-database-admin-password.md` (added when needed) describes the steps. The rotation does not require downtime — change the role password, then restart the API container so its admin engine picks up the new secret.
 
+## Amendment — API token storage (M2.5-B)
+
+Phase B introduces operator-managed API tokens for `Authorization: Bearer <token>` access. The original M2.5 milestone plan called for Argon2-hashed token storage. On implementation, that turned out to be wrong for this use case.
+
+### Decision
+
+- **Token format**: `uns_<env>_<random>` where `<env>` ∈ {`live`, `staging`, `dev`, `test`} and `<random>` is `secrets.token_urlsafe(32)` (~256 bits of entropy).
+- **Storage**: SHA-256 digest of the full token, stored as `BYTEA(32)` in `api_tokens.token_hash` with a unique index. Plaintext is shown to the operator exactly once at creation and never persisted.
+- **Verification**: a single indexed `SELECT … WHERE token_hash = $1` followed by `hmac.compare_digest` for the constant-time match. The compare is belt-and-suspenders against any future change that broadens the lookup (range filter, hash-prefix index, etc.).
+- **No HMAC pepper / no public_id segment for now.** Keeping the format minimal makes a future migration straightforward — both upgrades are backfills, not rewrites.
+
+### Why not Argon2
+
+The secret portion of the token carries ~256 bits of entropy. Brute-forcing a 256-bit random is `2^256` operations — categorically infeasible regardless of hash speed. Argon2/bcrypt/scrypt are designed to protect *low-entropy* inputs (human passwords) by making each guess expensive. For a high-entropy random secret, they add latency (10–100ms per verification) without adding security.
+
+OWASP's [Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html) explicitly reserves Argon2id for passwords. The [Cryptographic Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html) recommends fast hashes (SHA-256, HMAC-SHA-256) for high-entropy secrets where integrity is the property to preserve.
+
+### Why this matches industry practice
+
+- **GitHub PATs**: the 2021 token format change (typed prefix, base62 body, CRC32 checksum) was driven by Secret Scanning, not storage. The audit-log search uses the SHA-256 hash of the token as the search key — the strongest public signal that GitHub stores PATs hashed with SHA-256. ([GitHub Engineering Blog](https://github.blog/engineering/platform-security/behind-githubs-new-authentication-token-formats/))
+- **GitLab PATs**: the development guide mandates `TokenAuthenticatable` with SHA-256 digest storage and `ActiveSupport::SecurityUtils.secure_compare` for the match. Explicitly *not* bcrypt or Argon2. ([GitLab authentication guidelines](https://docs.gitlab.com/development/authentication/))
+- **Stripe, Slack, AWS**: all use typed-prefix high-entropy tokens. None of the public documentation suggests slow-KDF storage on the server.
+
+### What we deferred
+
+The full production-grade pattern would add:
+
+- An **HMAC-SHA-256 pepper** (server-side secret in `/run/secrets/api_token_pepper`), so a DB-only leak does not enable offline verification of leaked tokens.
+- An **embedded `public_id` segment** in the token so the lookup is by primary key instead of by hash-index — marginal performance gain at scale and what Slack/Stripe/prefix.dev do.
+- A **CRC32 checksum suffix** so we can register with GitHub's Secret Scanning partner program and have leaked tokens auto-revoke on push.
+
+All three are additive: we can introduce them without invalidating existing tokens (dual-read during migration, then drop the old shape). Worth doing once we have a concrete partner-program ask or a measurable lookup hot-spot; not worth doing speculatively at M2.5-B.
+
+### Constant-time comparison
+
+Python's `hmac.compare_digest` is the canonical timing-safe comparator. The `unstash.auth.tokens.constant_time_equals` wrapper makes the call-site intent explicit.
+
+### Token lifecycle (RLS exemption)
+
+The `api_tokens` table is intentionally **not** RLS-protected, for the same reason `users` and `access_tokens` (cookie sessions) are not: authentication must run before the request has any `app.current_org_id` context to scope against. Authorization (org membership, scopes) is enforced at the application layer after the token resolves to a user.
+
 ## References
 
 - ADR 0003 — File-based secrets on the VPS
@@ -106,4 +147,12 @@ For fresh databases (local dev, CI), `init-db.sh` handles everything and the mig
 - AWS Database Blog: [Multi-tenant data isolation with PostgreSQL Row Level Security](https://aws.amazon.com/blogs/database/multi-tenant-data-isolation-with-postgresql-row-level-security/)
 - Rico Fritzsche: [Mastering PostgreSQL Row Level Security for Multi-Tenancy](https://ricofritzsche.me/mastering-postgresql-row-level-security-rls-for-rock-solid-multi-tenancy/)
 - FastAPI-Users: [Cookie auth backend](https://fastapi-users.github.io/fastapi-users/latest/configuration/authentication/cookie/), [Database strategy](https://fastapi-users.github.io/fastapi-users/latest/configuration/authentication/strategies/database/)
-- OWASP Password Storage Cheat Sheet (Argon2id recommendation)
+- OWASP [Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html) (Argon2id for passwords only)
+- OWASP [Cryptographic Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html) (fast hashes for high-entropy secrets)
+- OWASP [API Security Top 10 — Broken Authentication](https://owasp.org/API-Security/editions/2023/en/0xa2-broken-authentication/)
+- GitHub Engineering: [Behind GitHub's new authentication token formats](https://github.blog/engineering/platform-security/behind-githubs-new-authentication-token-formats/)
+- GitHub Docs: [Secret Scanning partner program](https://docs.github.com/en/code-security/secret-scanning/secret-scanning-partnership-program/secret-scanning-partner-program)
+- GitLab dev docs: [Authentication](https://docs.gitlab.com/development/authentication/)
+- Slack: [Tokens overview](https://docs.slack.dev/authentication/tokens/)
+- Stripe: [API keys best practices](https://docs.stripe.com/keys-best-practices)
+- Internal: `notes/learning/auth/api-token-storage.md` (the deeper write-up that informed this amendment)

@@ -51,6 +51,7 @@ async def test_upgrade_head_produces_expected_table_set(
     expected = {
         "access_tokens",
         "alembic_version",
+        "api_tokens",
         "audit_log",
         "chunks",
         "connectors",
