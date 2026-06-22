@@ -35,6 +35,20 @@ services:
       UNSTASH_DEBUG: "false"
       UNSTASH_LOG_LEVEL: INFO
 
+  worker:
+    image: unstash-api:ci
+    secrets:
+      - database_password
+      - database_migrations_password
+      - database_admin_password
+      - session_secret
+      - encryption_key
+    environment:
+      UNSTASH_ENVIRONMENT: ci
+      UNSTASH_DEBUG: "false"
+      UNSTASH_LOG_LEVEL: INFO
+    command: ["taskiq", "worker", "unstash.tasks:broker"]
+
   postgres:
     image: unstash-postgres:ci
     secrets:

@@ -43,6 +43,26 @@ services:
           memory: 192M
           cpus: "0.5"
 
+  worker:
+    image: ${API_IMAGE:-ghcr.io/legitmattias/unstash-api}:${IMAGE_TAG:-staging}
+    secrets:
+      - database_password
+      - database_migrations_password
+      - database_admin_password
+      - session_secret
+      - encryption_key
+    environment:
+      UNSTASH_ENVIRONMENT: staging
+      UNSTASH_DEBUG: "false"
+      UNSTASH_LOG_LEVEL: DEBUG
+    command: ["taskiq", "worker", "unstash.tasks:broker"]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: "0.75"
+
   postgres:
     image: ${POSTGRES_IMAGE:-ghcr.io/legitmattias/unstash-postgres}:${IMAGE_TAG:-staging}
     secrets:

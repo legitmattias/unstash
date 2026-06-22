@@ -35,6 +35,25 @@ services:
     networks:
       - internal
 
+  worker:
+    # Same image as api; differs only in command. Pulls jobs from the
+    # Redis broker and runs them with the per-job org context set via
+    # unstash.tasks.org_context.
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      UNSTASH_DATABASE_HOST: postgres
+      UNSTASH_DATABASE_PORT: "5432"
+      UNSTASH_DATABASE_NAME: unstash
+      UNSTASH_DATABASE_USER: unstash_app
+      UNSTASH_REDIS_HOST: redis
+      UNSTASH_REDIS_PORT: "6379"
+    networks:
+      - internal
+
   postgres:
     image: postgres:17
     volumes:
