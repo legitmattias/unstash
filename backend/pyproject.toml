@@ -112,6 +112,7 @@ ignore = [
 "src/unstash/admin/router.py" = ["TC003"]
 "src/unstash/admin/schemas.py" = ["TC001", "TC003"]
 "src/unstash/orgs/schemas.py" = ["TC001", "TC003"]
+"src/unstash/auth/dependencies.py" = ["TC002"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

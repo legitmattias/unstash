@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -10,11 +11,20 @@ from fastapi_users.exceptions import InvalidPasswordException, UserAlreadyExists
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
-from unstash.admin.schemas import AdminUserCreate, MembershipCreate, MembershipRead
+from unstash.admin.schemas import (
+    AdminUserCreate,
+    ApiTokenCreate,
+    ApiTokenCreated,
+    ApiTokenRead,
+    MembershipCreate,
+    MembershipRead,
+)
 from unstash.auth.dependencies import current_superuser
 from unstash.auth.manager import get_user_manager
 from unstash.auth.schemas import UserCreate, UserRead
-from unstash.db.models import Organisation, OrgMembership, User
+from unstash.auth.tokens import env_for_environment, generate_token
+from unstash.config import get_settings
+from unstash.db.models import ApiToken, Organisation, OrgMembership, User
 from unstash.db.session import get_admin_session
 
 if TYPE_CHECKING:
@@ -166,3 +176,82 @@ async def remove_membership(
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     await session.commit()
+
+
+@admin_router.post(
+    "/users/{user_id}/tokens",
+    response_model=ApiTokenCreated,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_api_token(
+    user_id: uuid.UUID,
+    payload: ApiTokenCreate,
+    session: AdminSessionDep,
+    _superuser: SuperuserDep,
+) -> ApiTokenCreated:
+    """Mint an API token for a user. Plaintext is returned exactly once."""
+    if await session.get(User, user_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found.",
+        )
+    if payload.org_id is not None and await session.get(Organisation, payload.org_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organisation not found.",
+        )
+
+    settings = get_settings()
+    generated = generate_token(env_for_environment(settings.environment))
+    token_row = ApiToken(
+        user_id=user_id,
+        org_id=payload.org_id,
+        token_hash=generated.token_hash,
+        name=payload.name,
+        expires_at=payload.expires_at,
+    )
+    session.add(token_row)
+    await session.commit()
+    await session.refresh(token_row)
+    return ApiTokenCreated.model_validate(
+        {**token_row.__dict__, "token": generated.plaintext},
+    )
+
+
+@admin_router.get(
+    "/users/{user_id}/tokens",
+    response_model=list[ApiTokenRead],
+)
+async def list_api_tokens(
+    user_id: uuid.UUID,
+    session: AdminSessionDep,
+    _superuser: SuperuserDep,
+) -> list[ApiToken]:
+    """List a user's tokens. Plaintext is never returned post-creation."""
+    if await session.get(User, user_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    stmt = select(ApiToken).where(ApiToken.user_id == user_id).order_by(ApiToken.created_at.desc())
+    return list((await session.execute(stmt)).scalars())
+
+
+@admin_router.post(
+    "/users/{user_id}/tokens/{token_id}/revoke",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def revoke_api_token(
+    user_id: uuid.UUID,
+    token_id: uuid.UUID,
+    session: AdminSessionDep,
+    _superuser: SuperuserDep,
+) -> None:
+    """Mark a token as revoked. Idempotent: re-revoking a revoked token is a no-op."""
+    stmt = select(ApiToken).where(
+        ApiToken.id == token_id,
+        ApiToken.user_id == user_id,
+    )
+    token_row = (await session.execute(stmt)).scalar_one_or_none()
+    if token_row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    if token_row.revoked_at is None:
+        token_row.revoked_at = datetime.now(UTC)
+        await session.commit()
