@@ -20,6 +20,8 @@ services:
       UNSTASH_ENVIRONMENT: production
       UNSTASH_DEBUG: "false"
       UNSTASH_LOG_LEVEL: INFO
+    volumes:
+      - /mnt/unstash-data-production/documents:/var/unstash/documents
     restart: unless-stopped
     deploy:
       resources:
@@ -54,6 +56,8 @@ services:
       UNSTASH_ENVIRONMENT: production
       UNSTASH_DEBUG: "false"
       UNSTASH_LOG_LEVEL: INFO
+    volumes:
+      - /mnt/unstash-data-production/documents:/var/unstash/documents
     command: ["taskiq", "worker", "unstash.tasks:broker"]
     restart: unless-stopped
     deploy:

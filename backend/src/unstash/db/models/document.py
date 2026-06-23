@@ -13,7 +13,7 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
     BigInteger,
@@ -22,9 +22,11 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     String,
+    Text,
     Uuid,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from unstash.db.models.base import Base, TimestampMixin
@@ -103,6 +105,12 @@ class Document(Base, TimestampMixin):
         DateTime(timezone=True),
         nullable=True,
     )
+    # Forward-compat fields (see ADR rationale + spine note): which
+    # ingestion pipeline produced this document's chunks, so later
+    # phases can apply PII redaction or rebuild eval golden sets
+    # without re-ingesting.
+    pipeline_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pipeline_config: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     chunks: Mapped[list[Chunk]] = relationship(
         back_populates="document",

@@ -16,5 +16,6 @@ from __future__ import annotations
 
 from unstash.tasks.broker import broker
 from unstash.tasks.context import org_context
+from unstash.tasks.ingest import ingest_document
 
-__all__ = ["broker", "org_context"]
+__all__ = ["broker", "ingest_document", "org_context"]

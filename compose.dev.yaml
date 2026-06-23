@@ -12,6 +12,7 @@ services:
       - ./backend/src:/app/src:ro
       - ./backend/alembic:/app/alembic:ro
       - ./backend/alembic.ini:/app/alembic.ini:ro
+      - documents:/var/unstash/documents
     ports:
       - "127.0.0.1:8100:8000"
     secrets:
@@ -46,6 +47,7 @@ services:
       target: dev
     volumes:
       - ./backend/src:/app/src:ro
+      - documents:/var/unstash/documents
     secrets:
       - database_password
       - database_migrations_password
@@ -77,6 +79,9 @@ services:
   redis:
     ports:
       - "127.0.0.1:6380:6379"
+
+volumes:
+  documents:
 
 secrets:
   database_password:
