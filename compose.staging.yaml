@@ -21,6 +21,8 @@ services:
       UNSTASH_ENVIRONMENT: staging
       UNSTASH_DEBUG: "false"
       UNSTASH_LOG_LEVEL: DEBUG
+    volumes:
+      - /mnt/unstash-data-staging/documents:/var/unstash/documents
     restart: unless-stopped
     deploy:
       resources:
@@ -55,6 +57,8 @@ services:
       UNSTASH_ENVIRONMENT: staging
       UNSTASH_DEBUG: "false"
       UNSTASH_LOG_LEVEL: DEBUG
+    volumes:
+      - /mnt/unstash-data-staging/documents:/var/unstash/documents
     command: ["taskiq", "worker", "unstash.tasks:broker"]
     restart: unless-stopped
     deploy:

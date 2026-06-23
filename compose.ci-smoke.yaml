@@ -34,6 +34,8 @@ services:
       UNSTASH_ENVIRONMENT: ci
       UNSTASH_DEBUG: "false"
       UNSTASH_LOG_LEVEL: INFO
+    volumes:
+      - documents:/var/unstash/documents
 
   worker:
     image: unstash-api:ci
@@ -47,6 +49,8 @@ services:
       UNSTASH_ENVIRONMENT: ci
       UNSTASH_DEBUG: "false"
       UNSTASH_LOG_LEVEL: INFO
+    volumes:
+      - documents:/var/unstash/documents
     command: ["taskiq", "worker", "unstash.tasks:broker"]
 
   postgres:
@@ -59,6 +63,9 @@ services:
     environment:
       POSTGRES_DB: unstash
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_superuser_password
+
+volumes:
+  documents:
 
 secrets:
   database_password:

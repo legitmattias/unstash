@@ -44,8 +44,13 @@ CMD ["uv", "run", "uvicorn", "unstash.main:app", "--host", "0.0.0.0", "--port", 
 # ---------------------------------------------------------------------------
 FROM python:3.13-slim AS runtime
 
-RUN groupadd --system unstash && \
-    useradd --system --gid unstash --home-dir /app --no-create-home unstash
+# Pin the runtime UID/GID to 1000 so host bind-mounts (e.g. the
+# documents data volume on the VPS, owned by the operator's local
+# uid 1000) are writable by the container without chmod gymnastics.
+# A system account is still appropriate — no login shell, no home —
+# but we make the numeric uid explicit and stable across rebuilds.
+RUN groupadd --system --gid 1000 unstash && \
+    useradd --system --uid 1000 --gid unstash --home-dir /app --no-create-home unstash
 
 WORKDIR /app
 
