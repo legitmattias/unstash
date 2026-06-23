@@ -95,6 +95,19 @@ class Settings(BaseSettings):
     redis_host: str = Field(default="redis")
     redis_port: int = Field(default=6379)
 
+    # -- Document ingestion ----------------------------------------------------
+    # The on-disk root for uploaded documents. In containers this is
+    # bind-mounted from the per-environment data volume; locally it
+    # defaults to a path under /var. Files live under
+    # ``{documents_root}/{org_id}/{document_id}/{filename}``.
+
+    documents_root: Path = Field(default=Path("/var/unstash/documents"))
+    max_upload_bytes: int = Field(
+        default=100 * 1024 * 1024,
+        ge=1,
+        description="Maximum upload size per document, in bytes.",
+    )
+
     # -- External APIs ---------------------------------------------------------
     # Added when their respective features are implemented.
 

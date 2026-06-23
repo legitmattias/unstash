@@ -18,6 +18,9 @@ import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+# UNSTASH_TASKIQ_IN_MEMORY=1 is set at the top of tests/conftest.py
+# (loaded before this one) so the Taskiq broker is the in-memory
+# implementation across all tests.
 import asyncpg
 import pytest
 import pytest_asyncio

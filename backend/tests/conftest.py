@@ -2,6 +2,17 @@
 
 from __future__ import annotations
 
+import os
+
+# Force the in-memory Taskiq broker for all tests. The broker module
+# reads this env var at import time and chooses InMemoryBroker over
+# the Redis-backed ListQueueBroker, so any test that imports
+# unstash.tasks (directly or transitively via create_app) gets an
+# in-process broker and does not need a Redis container. Tests that
+# actually queue jobs call broker.startup()/shutdown() in their
+# fixture; tests that merely import the module do not.
+os.environ.setdefault("UNSTASH_TASKIQ_IN_MEMORY", "1")
+
 from typing import TYPE_CHECKING
 
 import pytest
