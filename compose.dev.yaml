@@ -39,6 +39,25 @@ services:
       NODE_ENV: development
     command: ["pnpm", "run", "dev", "--host", "0.0.0.0"]
 
+  worker:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      target: dev
+    volumes:
+      - ./backend/src:/app/src:ro
+    secrets:
+      - database_password
+      - database_migrations_password
+      - database_admin_password
+      - session_secret
+      - encryption_key
+    environment:
+      UNSTASH_ENVIRONMENT: development
+      UNSTASH_DEBUG: "true"
+      UNSTASH_LOG_LEVEL: DEBUG
+    command: ["uv", "run", "taskiq", "worker", "unstash.tasks:broker", "--reload"]
+
   postgres:
     build:
       context: .
