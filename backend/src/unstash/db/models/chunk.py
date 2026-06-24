@@ -85,7 +85,13 @@ class Chunk(Base):
     token_count: Mapped[int] = mapped_column(Integer, nullable=False)
     char_offset_start: Mapped[int] = mapped_column(Integer, nullable=False)
     char_offset_end: Mapped[int] = mapped_column(Integer, nullable=False)
-    embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM), nullable=False)
+    # Nullable because parsing (M3-B) writes chunks before embedding (M3-C).
+    # The DiskANN index naturally skips NULL rows, so search results never
+    # contain a chunk that hasn't been embedded yet.
+    embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(EMBEDDING_DIM),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
