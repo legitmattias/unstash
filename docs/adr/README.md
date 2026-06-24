@@ -23,10 +23,13 @@ Each ADR follows Michael Nygard's structure:
 | ADR | Title | Status |
 |---|---|---|
 | [0000](./0000-record-architecture-decisions.md) | Record Architecture Decisions | Accepted |
-| [0001](./0001-initial-stack-choices.md) | Initial Stack Choices | Accepted |
+| [0001](./0001-initial-stack-choices.md) | Initial Stack Choices | Accepted (Frontend section superseded by ADR 0007) |
 | [0002](./0002-ci-driven-deployment.md) | CI-Driven Deployment via SSH Docker Context | Accepted |
 | [0003](./0003-file-based-secrets-on-vps.md) | File-Based Secrets on the VPS | Accepted |
 | [0004](./0004-branch-based-environments.md) | Branch-Based Environments (development → staging, main → production) | Accepted |
+| [0005](./0005-multi-tenant-isolation.md) | Multi-Tenant Isolation — Application Filter + Row-Level Security | Accepted |
+| [0006](./0006-auth-and-cross-tenant-admin.md) | Authentication, Session Storage, and Cross-Tenant Admin | Accepted |
+| [0007](./0007-frontend-nextjs.md) | Frontend — Next.js (App Router) over SvelteKit | Accepted |
 
 ## Creating a new ADR
 
