@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted. (Frontend section superseded by ADR 0007.)
 
 ## Context
 
