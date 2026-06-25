@@ -36,18 +36,20 @@ import structlog
 from sqlalchemy import func, select
 
 from unstash.db.models import Chunk, Document, JobProgress
+from unstash.tasks.broker import broker
+from unstash.tasks.context import org_context
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
-from unstash.documents.mime import detect_mime
-from unstash.documents.parser import (
-    PIPELINE_VERSION,
-    ParsedDocument,
-    parse_to_chunks,
-)
-from unstash.documents.strategy import ParseStrategy, select_strategy
-from unstash.tasks.broker import broker
-from unstash.tasks.context import org_context
+
+    from unstash.documents.parser import ParsedDocument
+
+# Imports of unstash.documents.mime / parser / strategy are deferred
+# into _run_parse so the API container does not pay the Docling +
+# transformers + torch import cost. Only the worker process actually
+# runs this task body, so only the worker loads those modules. This
+# keeps the API container well within its memory limit (was OOM-killed
+# at 384 MB when it transitively imported torch via the task module).
 
 logger = structlog.get_logger(__name__)
 
@@ -126,7 +128,21 @@ async def _run_parse(
     Sync MIME detection and parsing are wrapped in :func:`asyncio.to_thread`
     so the worker event loop is not blocked on disk reads or
     CPU-bound document parsing.
+
+    The Docling-using imports below are deferred to function scope so
+    the API container does not pay the model-stack import cost. Only
+    the worker that actually runs this task loads them.
     """
+    from unstash.documents.mime import detect_mime  # noqa: PLC0415
+    from unstash.documents.parser import (  # noqa: PLC0415
+        PIPELINE_VERSION,
+        parse_to_chunks,
+    )
+    from unstash.documents.strategy import (  # noqa: PLC0415
+        ParseStrategy,
+        select_strategy,
+    )
+
     mime = await asyncio.to_thread(detect_mime, file_path)
     strategy = select_strategy(mime)
 

@@ -64,8 +64,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 384M
-          cpus: "0.75"
+          # Worker peak RAM is dominated by Docling + transformers +
+          # torch model load (~1 GB resident) plus headroom for an
+          # active parse. 384 MB was OOM-killed at import time.
+          memory: 1500M
+          cpus: "1.0"
 
   postgres:
     image: ${POSTGRES_IMAGE:-ghcr.io/legitmattias/unstash-postgres}:${IMAGE_TAG:-staging}
