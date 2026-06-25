@@ -35,6 +35,9 @@ dependencies = [
     "taskiq-redis>=1.0.0",
     "aiofiles>=24.1.0",
     "python-multipart>=0.0.20",
+    "python-magic>=0.4.27",
+    "docling>=2.81.0",
+    "transformers>=4.45.0",
 ]
 
 [dependency-groups]
@@ -46,6 +49,7 @@ dev = [
     "ruff>=0.7.0",
     "pyright>=1.1.384",
     "testcontainers[postgres]>=4.7.0",
+    "reportlab>=4.0.0",
 ]
 
 [build-system]
@@ -170,6 +174,16 @@ addopts = [
 filterwarnings = [
     "error",
     "ignore::DeprecationWarning:pydantic.*",
+    # Docling internals trigger DeprecationWarnings about their own
+    # transitional API (e.g. table-image extraction). Not our problem
+    # at this layer; suppress so tests don't fail on third-party
+    # deprecation noise.
+    "ignore::DeprecationWarning:docling.*",
+    "ignore::DeprecationWarning:docling_core.*",
+    # transformers emits FutureWarnings about model-loading defaults
+    # that we don't control.
+    "ignore::FutureWarning:transformers.*",
+    "ignore::UserWarning:transformers.*",
 ]
 
 [tool.coverage.run]

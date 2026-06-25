@@ -3,6 +3,15 @@
 # ---------------------------------------------------------------------------
 FROM python:3.13-slim AS builder
 
+# libmagic1 is needed at runtime by python-magic (used for content-based
+# MIME detection during ingestion). Installed in the builder so both the
+# dev image (which extends builder) and the runtime image (which only
+# copies the venv) work — the runtime stage installs it again on its
+# own slim base.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libmagic1 && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 ENV UV_COMPILE_BYTECODE=1 \
@@ -44,23 +53,40 @@ CMD ["uv", "run", "uvicorn", "unstash.main:app", "--host", "0.0.0.0", "--port", 
 # ---------------------------------------------------------------------------
 FROM python:3.13-slim AS runtime
 
+# libmagic1 is required at runtime by the python-magic MIME detector.
+# Without it, ``import magic`` works but every call raises at runtime.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libmagic1 && \
+    rm -rf /var/lib/apt/lists/*
+
 # Pin the runtime UID/GID to 1000 so host bind-mounts (e.g. the
 # documents data volume on the VPS, owned by the operator's local
 # uid 1000) are writable by the container without chmod gymnastics.
 # A system account is still appropriate — no login shell, no home —
 # but we make the numeric uid explicit and stable across rebuilds.
+# The home directory matters here because the model caches we
+# warm below land under $HOME — so we DO create it and set it to /app.
 RUN groupadd --system --gid 1000 unstash && \
-    useradd --system --uid 1000 --gid unstash --home-dir /app --no-create-home unstash
+    useradd --system --uid 1000 --gid unstash --home-dir /home/unstash --create-home unstash
 
 WORKDIR /app
 
-COPY --from=builder /app/.venv /app/.venv
-COPY --from=builder /app/alembic.ini /app/alembic.ini
-COPY --from=builder /app/alembic /app/alembic
+COPY --from=builder --chown=unstash:unstash /app/.venv /app/.venv
+COPY --from=builder --chown=unstash:unstash /app/alembic.ini /app/alembic.ini
+COPY --from=builder --chown=unstash:unstash /app/alembic /app/alembic
 
 ENV PATH="/app/.venv/bin:$PATH"
 
 USER unstash
+
+# Pre-cache the Docling and chunker tokenizer models into the image
+# so cold-start parses do not have to download artefacts at runtime.
+# Both caches live under $HOME (/home/unstash) which is set up above.
+# Running as the unstash user is intentional — the caches need to be
+# readable by the worker process at runtime.
+ENV HF_HOME=/home/unstash/.cache/huggingface
+RUN docling-tools models download && \
+    python -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')"
 
 EXPOSE 8000
 
