@@ -54,13 +54,23 @@ class ParsedChunk:
     char_offset_end: int
 
 
+def _empty_config() -> dict[str, Any]:
+    """Typed empty-dict factory for the ``pipeline_config`` field.
+
+    Plain ``default_factory=dict`` produces ``dict[Unknown, Unknown]``
+    under strict pyright; this explicit typed wrapper resolves the
+    annotation without resorting to ``# pyright: ignore``.
+    """
+    return {}
+
+
 @dataclass(frozen=True, slots=True)
 class ParsedDocument:
     """Result of parsing one document."""
 
     chunks: list[ParsedChunk]
     pipeline_version: str
-    pipeline_config: dict[str, Any] = field(default_factory=dict)
+    pipeline_config: dict[str, Any] = field(default_factory=_empty_config)
 
 
 @lru_cache(maxsize=1)
