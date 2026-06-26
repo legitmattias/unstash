@@ -67,7 +67,9 @@ RUN apt-get update && \
 # The home directory matters here because the model caches we
 # warm below land under $HOME — so we DO create it and set it to /app.
 RUN groupadd --system --gid 1000 unstash && \
-    useradd --system --uid 1000 --gid unstash --home-dir /home/unstash --create-home unstash
+    useradd --system --uid 1000 --gid unstash --home-dir /home/unstash --create-home unstash && \
+    mkdir -p /home/unstash/.cache/huggingface && \
+    chown -R unstash:unstash /home/unstash/.cache
 
 WORKDIR /app
 
@@ -87,6 +89,11 @@ USER unstash
 # restarts. The api container also points HF_HOME here (so any
 # transient HF library usage there hits the same volume on the same
 # host), but only the worker actually populates the cache.
+#
+# The /home/unstash/.cache directory was created with the right
+# ownership in the useradd RUN block above so that when Docker
+# mounts the named volume on top, the volume inherits those
+# permissions and the unstash user can write to it.
 ENV HF_HOME=/home/unstash/.cache/huggingface
 
 EXPOSE 8000
