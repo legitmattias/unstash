@@ -58,19 +58,16 @@ services:
       UNSTASH_LOG_LEVEL: INFO
     volumes:
       - /mnt/unstash-data-production/documents:/var/unstash/documents
-      # Docling + HuggingFace model cache. The worker downloads ~3 GB
-      # of models on first parse after a fresh volume; subsequent
-      # restarts hit the cache. Named volume so it survives container
-      # recreates across deploys.
+      # HuggingFace + Docling model cache (~3 GB after first parse).
+      # Named volume so the download survives container recreates.
       - worker_model_cache:/home/unstash/.cache
     command: ["taskiq", "worker", "unstash.tasks:broker"]
     restart: unless-stopped
     deploy:
       resources:
         limits:
-          # Worker peak RAM is dominated by Docling + transformers +
-          # torch model load (~1 GB resident) plus headroom for an
-          # active parse. 512 MB was OOM-killed at import time.
+          # Docling + transformers + torch resident ~1 GB plus parse
+          # headroom.
           memory: 1500M
           cpus: "1.0"
 

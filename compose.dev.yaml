@@ -48,8 +48,7 @@ services:
     volumes:
       - ./backend/src:/app/src:ro
       - documents:/var/unstash/documents
-      # Docling + HuggingFace model cache (~3 GB on first parse).
-      # Named volume so the download survives `docker compose down`.
+      # HuggingFace + Docling model cache (~3 GB after first parse).
       - worker_model_cache:/home/unstash/.cache
     secrets:
       - database_password
