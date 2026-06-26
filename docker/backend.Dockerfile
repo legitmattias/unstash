@@ -79,14 +79,15 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 USER unstash
 
-# Pre-cache the Docling and chunker tokenizer models into the image
-# so cold-start parses do not have to download artefacts at runtime.
-# Both caches live under $HOME (/home/unstash) which is set up above.
-# Running as the unstash user is intentional — the caches need to be
-# readable by the worker process at runtime.
+# Docling and HuggingFace model caches live under the user's home
+# directory. We do NOT pre-download models into the image layer —
+# that would push the image to several GB. Instead the worker
+# downloads on first parse and the compose file mounts a named
+# docker volume at this path so the cache survives container
+# restarts. The api container also points HF_HOME here (so any
+# transient HF library usage there hits the same volume on the same
+# host), but only the worker actually populates the cache.
 ENV HF_HOME=/home/unstash/.cache/huggingface
-RUN docling-tools models download && \
-    python -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')"
 
 EXPOSE 8000
 

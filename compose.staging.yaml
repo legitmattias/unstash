@@ -59,6 +59,11 @@ services:
       UNSTASH_LOG_LEVEL: DEBUG
     volumes:
       - /mnt/unstash-data-staging/documents:/var/unstash/documents
+      # Docling + HuggingFace model cache. The worker downloads ~3 GB
+      # of models on first parse after a fresh volume; subsequent
+      # restarts hit the cache. Named volume so it survives container
+      # recreates across deploys.
+      - worker_model_cache:/home/unstash/.cache
     command: ["taskiq", "worker", "unstash.tasks:broker"]
     restart: unless-stopped
     deploy:
@@ -94,6 +99,9 @@ services:
         limits:
           memory: 64M
           cpus: "0.25"
+
+volumes:
+  worker_model_cache:
 
 secrets:
   database_password:

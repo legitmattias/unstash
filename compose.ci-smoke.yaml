@@ -51,6 +51,7 @@ services:
       UNSTASH_LOG_LEVEL: INFO
     volumes:
       - documents:/var/unstash/documents
+      - worker_model_cache:/home/unstash/.cache
     command: ["taskiq", "worker", "unstash.tasks:broker"]
 
   postgres:
@@ -66,6 +67,7 @@ services:
 
 volumes:
   documents:
+  worker_model_cache:
 
 secrets:
   database_password:
