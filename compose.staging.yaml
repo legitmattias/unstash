@@ -62,14 +62,14 @@ services:
       # HuggingFace + Docling model cache (~3 GB after first parse).
       # Named volume so the download survives container recreates.
       - worker_model_cache:/home/unstash/.cache
-    command: ["taskiq", "worker", "unstash.tasks:broker"]
+    command: ["taskiq", "worker", "--workers", "1", "unstash.tasks:broker"]
     restart: unless-stopped
     deploy:
       resources:
         limits:
-          # Docling + transformers + torch resident ~1 GB plus parse
-          # headroom.
-          memory: 1500M
+          # One worker process loading Docling layout + tableformer
+          # models needs ~2 GB resident. Headroom for parse buffers.
+          memory: 2500M
           cpus: "1.0"
 
   postgres:
