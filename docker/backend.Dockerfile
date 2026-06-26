@@ -53,10 +53,20 @@ CMD ["uv", "run", "uvicorn", "unstash.main:app", "--host", "0.0.0.0", "--port", 
 # ---------------------------------------------------------------------------
 FROM python:3.13-slim AS runtime
 
-# libmagic1 is required at runtime by the python-magic MIME detector.
-# Without it, ``import magic`` works but every call raises at runtime.
+# libmagic1: python-magic MIME detection (import works, calls fail
+#   without it).
+# libxcb1, libxext6, libsm6, libice6, libglib2.0-0, libgl1: pulled in
+#   indirectly by Docling's image-processing path (opencv-headless,
+#   PIL, etc.) at parse time.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends libmagic1 && \
+    apt-get install -y --no-install-recommends \
+        libmagic1 \
+        libxcb1 \
+        libxext6 \
+        libsm6 \
+        libice6 \
+        libglib2.0-0 \
+        libgl1 && \
     rm -rf /var/lib/apt/lists/*
 
 # Pin the runtime UID/GID to 1000 so host bind-mounts (e.g. the
