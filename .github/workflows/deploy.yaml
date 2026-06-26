@@ -123,6 +123,11 @@ jobs:
           docker compose -p unstash-staging -f compose.yaml -f compose.staging.yaml pull
           docker compose -p unstash-staging -f compose.yaml -f compose.staging.yaml up -d
 
+      - name: Prune old images
+        env:
+          DOCKER_HOST: ssh://${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+        run: docker image prune -a -f --filter "until=72h"
+
       - name: Health check
         run: |
           echo "Waiting for services to start..."
@@ -166,6 +171,11 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           docker compose -p unstash-production -f compose.yaml -f compose.production.yaml pull
           docker compose -p unstash-production -f compose.yaml -f compose.production.yaml up -d
+
+      - name: Prune old images
+        env:
+          DOCKER_HOST: ssh://${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+        run: docker image prune -a -f --filter "until=72h"
 
       - name: Health check
         run: |
