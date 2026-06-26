@@ -308,6 +308,10 @@ jobs:
 
       - name: Run integration tests
         working-directory: backend
+        env:
+          # HF_TOKEN lifts the HuggingFace Hub anonymous rate limit so
+          # parallel test runs downloading the tokenizer don't hit 429.
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: uv run pytest tests/integration --no-cov
 
   # ---------------------------------------------------------------------------
