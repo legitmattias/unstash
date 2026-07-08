@@ -2,13 +2,13 @@
 
 ## Purpose
 
-Apply pending Alembic migrations to a deployed database. This is the manual procedure used until the deploy workflow runs `alembic upgrade head` automatically (planned).
+Apply pending Alembic migrations to a deployed database by hand. The deploy workflow applies migrations automatically (`alembic upgrade head` runs between image pull and app rollout), so this is a break-glass procedure, not part of routine releases.
 
 ## When to use it
 
-- A release has shipped that includes new Alembic migrations.
-- The deploy workflow has completed (CI green, new container images deployed).
-- The application schema is behind the application code. Symptoms include: routes failing because expected tables don't exist, or `alembic current` showing a revision earlier than `alembic heads`.
+- The automatic migration step in the deploy workflow failed and the schema is in a partially-upgraded state that needs inspection before retrying.
+- A database was deployed or restored outside the deploy workflow and its schema is behind the application code. Symptoms include: routes failing because expected tables don't exist, or `alembic current` showing a revision earlier than `alembic heads`.
+- A downgrade or other non-standard Alembic operation is needed (the workflow only ever upgrades to head).
 
 ## Prerequisites
 

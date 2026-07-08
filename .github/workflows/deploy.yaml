@@ -121,6 +121,9 @@ jobs:
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           docker compose -p unstash-staging -f compose.yaml -f compose.staging.yaml pull
+          # Migrations must complete before the new app code starts serving.
+          docker compose -p unstash-staging -f compose.yaml -f compose.staging.yaml up -d postgres redis
+          docker compose -p unstash-staging -f compose.yaml -f compose.staging.yaml run --rm api alembic upgrade head
           docker compose -p unstash-staging -f compose.yaml -f compose.staging.yaml up -d
 
       - name: Prune old images
@@ -170,6 +173,9 @@ jobs:
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           docker compose -p unstash-production -f compose.yaml -f compose.production.yaml pull
+          # Migrations must complete before the new app code starts serving.
+          docker compose -p unstash-production -f compose.yaml -f compose.production.yaml up -d postgres redis
+          docker compose -p unstash-production -f compose.yaml -f compose.production.yaml run --rm api alembic upgrade head
           docker compose -p unstash-production -f compose.yaml -f compose.production.yaml up -d
 
       - name: Prune old images
