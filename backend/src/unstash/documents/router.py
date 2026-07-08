@@ -41,8 +41,8 @@ async def upload_document(
     with the original filename. A row is inserted in ``documents``
     with ``status='pending'`` and a matching row in ``job_progress``
     with ``status='queued'``. The ``ingest_document`` task is then
-    queued; the task body sets the document to ``parsing`` and then
-    ``parsed`` (Phase A stub — real parsing arrives in Phase B).
+    queued; the task body detects the MIME type, routes it through the
+    parse strategy, and moves the document to ``parsed`` or ``failed``.
 
     Returns the new document id and job id immediately. The caller
     polls ``GET /api/orgs/{slug}/jobs/{id}`` to follow progress.
