@@ -9,9 +9,13 @@ container instead of marking the deploy successful.
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import text
 
 if TYPE_CHECKING:
@@ -120,3 +124,64 @@ async def check_required_extensions(conn: AsyncConnection) -> None:
         )
 
     logger.info("startup_check_passed", check="required_extensions")
+
+
+def _code_head_revision(alembic_ini: str | Path) -> str:
+    """Resolve the single head revision declared by the migration scripts.
+
+    Synchronous — reads alembic.ini and the versions directory from disk.
+    Callers in async context run it via ``asyncio.to_thread``.
+    """
+    ini_path = Path(alembic_ini)
+    if not ini_path.is_file():
+        raise StartupCheckError(
+            f"alembic.ini not found at {ini_path.resolve()}; cannot determine "
+            "the code's migration head. The runtime image copies alembic.ini "
+            "into the working directory — check the image build."
+        )
+
+    script = ScriptDirectory.from_config(Config(str(ini_path)))
+    heads = script.get_heads()
+    if len(heads) != 1:
+        raise StartupCheckError(
+            f"Migration history has {len(heads)} heads: {sorted(heads)}. "
+            "The revision graph must be linear; merge the branched revisions "
+            "before deploying."
+        )
+    return heads[0]
+
+
+async def check_schema_at_head(
+    conn: AsyncConnection,
+    alembic_ini: str | Path = "alembic.ini",
+) -> None:
+    """Confirm the database schema is at the code's migration head.
+
+    Migrations are applied by the deploy workflow before new app code is
+    rolled out, so a mismatch here means the database was set up or migrated
+    outside that workflow (fresh volume, manual restore, out-of-band deploy).
+    Without this check the container reports healthy and fails at query time
+    instead.
+    """
+    head = await asyncio.to_thread(_code_head_revision, alembic_ini)
+
+    result = await conn.execute(
+        text("SELECT to_regclass('public.alembic_version')"),
+    )
+    if result.scalar_one() is None:
+        raise StartupCheckError(
+            "The alembic_version table does not exist — the database has "
+            "never been migrated. Run: "
+            "docker compose run --rm api alembic upgrade head"
+        )
+
+    result = await conn.execute(text("SELECT version_num FROM alembic_version"))
+    revisions = sorted(row[0] for row in result)
+    if revisions != [head]:
+        raise StartupCheckError(
+            f"Database schema revision {revisions or '(none)'} does not match "
+            f"the code's migration head {head!r}. Run: "
+            "docker compose run --rm api alembic upgrade head"
+        )
+
+    logger.info("startup_check_passed", check="schema_at_head")

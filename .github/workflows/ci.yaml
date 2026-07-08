@@ -201,12 +201,22 @@ jobs:
           done
           ls -la "$SECRETS_DIR"
 
-      - name: Bring up postgres + api
+      # Same order as the deploy workflow: migrate via a one-off runtime
+      # container, then start the app. The api's schema-at-head startup
+      # check fails if this order is broken.
+      - name: Apply migrations via one-off runtime container
         run: |
           docker compose \
             -f compose.yaml -f compose.ci-smoke.yaml \
             -p unstash-ci-smoke \
-            up -d postgres api
+            run --rm api alembic upgrade head
+
+      - name: Bring up api
+        run: |
+          docker compose \
+            -f compose.yaml -f compose.ci-smoke.yaml \
+            -p unstash-ci-smoke \
+            up -d api
 
       - name: Wait for api to become healthy
         run: |
@@ -226,13 +236,6 @@ jobs:
           echo "::error::api did not become healthy within timeout"
           docker logs unstash-ci-smoke-api-1
           exit 1
-
-      - name: Apply migrations via alembic
-        run: |
-          docker compose \
-            -f compose.yaml -f compose.ci-smoke.yaml \
-            -p unstash-ci-smoke \
-            exec -T api alembic upgrade head
 
       - name: Verify alembic at head
         run: |
@@ -264,13 +267,13 @@ jobs:
         run: |
           logs=$(docker logs unstash-ci-smoke-api-1 2>&1)
           echo "$logs" | grep "startup_check_passed" || true
-          for check in secrets_loadable not_superuser required_extensions; do
+          for check in secrets_loadable not_superuser required_extensions schema_at_head; do
             if ! echo "$logs" | grep "startup_check_passed" | grep -q "$check"; then
               echo "::error::startup_check_passed log line not found for: $check"
               exit 1
             fi
           done
-          echo "::notice::all three startup checks logged as passed"
+          echo "::notice::all four startup checks logged as passed"
 
       - name: Tear down
         if: always()

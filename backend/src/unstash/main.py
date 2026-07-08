@@ -27,6 +27,7 @@ from unstash.orgs import orgs_router
 from unstash.startup_checks import (
     check_not_superuser,
     check_required_extensions,
+    check_schema_at_head,
     check_secrets_loadable,
 )
 
@@ -39,7 +40,7 @@ logger = structlog.get_logger(__name__)
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan — startup and shutdown hooks.
 
-    Startup runs three configuration sanity checks in order:
+    Startup runs four configuration sanity checks in order:
 
     1. Secret-loadability — fails before any DB call so a missing
        database_password produces a clear message rather than an opaque
@@ -47,6 +48,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     2. Database connectivity — confirms the engine can reach Postgres.
     3. Not-superuser and required-extensions — confirm the role and
        database state required for RLS and our schema actually hold.
+    4. Schema-at-head — confirms the database has been migrated to the
+       code's Alembic head, so stale schemas fail here instead of at
+       query time.
 
     Each check raises ``StartupCheckError`` with an actionable message on
     failure; FastAPI propagates that as a startup error, the container exits
@@ -69,6 +73,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await conn.execute(text("SELECT 1"))
         await check_not_superuser(conn)
         await check_required_extensions(conn)
+        await check_schema_at_head(conn)
 
     try:
         yield
