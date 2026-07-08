@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 
 from unstash.config import Settings
 from unstash.startup_checks import (
@@ -13,8 +16,12 @@ from unstash.startup_checks import (
     StartupCheckError,
     check_not_superuser,
     check_required_extensions,
+    check_schema_at_head,
     check_secrets_loadable,
 )
+
+BACKEND_ROOT = Path(__file__).parents[1]
+ALEMBIC_INI = BACKEND_ROOT / "alembic.ini"
 
 # ---------------------------------------------------------------------------
 # check_secrets_loadable
@@ -137,3 +144,66 @@ async def test_check_required_extensions_lists_all_missing() -> None:
     message = str(exc_info.value)
     for missing in ("vector", "vectorscale", "pg_search"):
         assert missing in message
+
+
+# ---------------------------------------------------------------------------
+# check_schema_at_head
+# ---------------------------------------------------------------------------
+
+
+def _code_head() -> str:
+    """The migration head declared by the real alembic scripts."""
+    return ScriptDirectory.from_config(Config(str(ALEMBIC_INI))).get_heads()[0]
+
+
+def _mock_conn_with_schema(
+    regclass: str | None,
+    revisions: list[str],
+) -> AsyncMock:
+    """Mock AsyncConnection for the schema check's two queries in order."""
+    conn = AsyncMock()
+    regclass_result = MagicMock()
+    regclass_result.scalar_one.return_value = regclass
+    rows_result = MagicMock()
+    rows_result.__iter__ = lambda self: iter([(rev,) for rev in revisions])
+    conn.execute = AsyncMock(side_effect=[regclass_result, rows_result])
+    return conn
+
+
+async def test_check_schema_at_head_passes_at_head() -> None:
+    conn = _mock_conn_with_schema("alembic_version", [_code_head()])
+    await check_schema_at_head(conn, alembic_ini=ALEMBIC_INI)
+
+
+async def test_check_schema_at_head_raises_when_never_migrated() -> None:
+    conn = _mock_conn_with_schema(None, [])
+
+    with pytest.raises(StartupCheckError) as exc_info:
+        await check_schema_at_head(conn, alembic_ini=ALEMBIC_INI)
+
+    message = str(exc_info.value)
+    assert "never been migrated" in message
+    assert "alembic upgrade head" in message
+
+
+async def test_check_schema_at_head_raises_on_stale_revision() -> None:
+    conn = _mock_conn_with_schema("alembic_version", ["0001"])
+
+    with pytest.raises(StartupCheckError) as exc_info:
+        await check_schema_at_head(conn, alembic_ini=ALEMBIC_INI)
+
+    message = str(exc_info.value)
+    assert "0001" in message
+    assert _code_head() in message
+
+
+async def test_check_schema_at_head_raises_when_ini_missing(
+    tmp_path: Path,
+) -> None:
+    conn = AsyncMock()
+
+    with pytest.raises(StartupCheckError) as exc_info:
+        await check_schema_at_head(conn, alembic_ini=tmp_path / "missing.ini")
+
+    assert "alembic.ini not found" in str(exc_info.value)
+    conn.execute.assert_not_awaited()
