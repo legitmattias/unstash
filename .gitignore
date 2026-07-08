@@ -46,6 +46,7 @@ env/
 .pytest_cache/
 .coverage
 .coverage.*
+.coverage-html/
 htmlcov/
 .tox/
 .nox/
