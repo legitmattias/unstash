@@ -38,6 +38,7 @@ from sqlalchemy import func, select
 from unstash.db.models import Chunk, Document, JobProgress
 from unstash.tasks.broker import broker
 from unstash.tasks.context import org_context
+from unstash.tasks.instrumentation import peak_rss_mib, queue_depth
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -83,28 +84,39 @@ async def ingest_document(
         job.started_at = started
         await session.flush()
 
+        logger.info(
+            "ingest_job_started",
+            org_id=str(org_id),
+            document_id=str(document_id),
+            queue_depth=await queue_depth(broker),
+        )
+
         file_path = Path(document.source_uri)
         try:
             await _run_parse(session, document, file_path)
             document.status = _resolve_final_status(document)
         except Exception as exc:
+            finished = datetime.now(UTC)
             logger.info(
                 "ingest_document_failed",
                 org_id=str(org_id),
                 document_id=str(document_id),
                 exc_type=type(exc).__name__,
                 exc_msg=str(exc),
+                duration_ms=round((finished - started).total_seconds() * 1000),
+                peak_rss_mib=round(peak_rss_mib(), 1),
             )
             document.status = "failed"
             document.parsing_error = f"{type(exc).__name__}: {exc}"
             job.status = "failed"
             job.error = document.parsing_error
-            job.finished_at = datetime.now(UTC)
+            job.finished_at = finished
             await session.flush()
             return
 
+        finished = datetime.now(UTC)
         job.status = "succeeded"
-        job.finished_at = datetime.now(UTC)
+        job.finished_at = finished
         chunk_count = await session.scalar(
             select(func.count(Chunk.id)).where(Chunk.document_id == document.id),
         )
@@ -113,6 +125,8 @@ async def ingest_document(
             org_id=str(org_id),
             document_id=str(document_id),
             chunks=chunk_count,
+            duration_ms=round((finished - started).total_seconds() * 1000),
+            peak_rss_mib=round(peak_rss_mib(), 1),
         )
 
 
