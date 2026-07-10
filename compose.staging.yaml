@@ -97,6 +97,16 @@ services:
           memory: 64M
           cpus: "0.25"
 
+  gotenberg:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          # LibreOffice spins up per conversion; idle cost is low. The
+          # cap contains a runaway conversion on the shared host.
+          memory: 512M
+          cpus: "0.5"
+
 volumes:
   worker_model_cache:
 

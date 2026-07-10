@@ -44,6 +44,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      gotenberg:
+        condition: service_healthy
     environment:
       UNSTASH_DATABASE_HOST: postgres
       UNSTASH_DATABASE_PORT: "5432"
@@ -76,6 +78,24 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - internal
+
+  gotenberg:
+    # LibreOffice-only variant: converts legacy office formats to PDF
+    # for the worker's CONVERT_THEN_EXTRACT path. No Chromium (we don't
+    # render HTML), so ~38% smaller than the full image. Pinned because
+    # the bundled LibreOffice moves fast.
+    image: gotenberg/gotenberg:8.34.0-libreoffice
+    # Internal network only, never published. The conversion API runs
+    # LibreOffice on uploaded bytes, so it must not be reachable from
+    # outside the compose network.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
     networks:
       - internal
 

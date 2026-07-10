@@ -9,8 +9,9 @@ The job:
    - ``EXTRACT``: parse with Docling, run HybridChunker, insert chunks
      with NULL embedding (M3-C fills embeddings later). Sets
      ``document.status = 'parsed'``.
-   - ``CONVERT_THEN_EXTRACT``: not wired in this PR (M3-B PR 2 adds
-     Gotenberg). Currently treated as ``SKIP``.
+   - ``CONVERT_THEN_EXTRACT``: convert the legacy office file to PDF via
+     the Gotenberg sidecar, then run it through the same Docling PDF
+     path as ``EXTRACT``.
    - ``METADATA_ONLY``: skip chunking; mark ``parsed`` (the document
      is recognised, just not chunkable). Phase D may add metadata
      extraction here.
@@ -145,10 +146,7 @@ async def _run_parse(
     Docling + transformers + torch load cost.
     """
     from unstash.documents.mime import detect_mime  # noqa: PLC0415
-    from unstash.documents.parser import (  # noqa: PLC0415
-        PIPELINE_VERSION,
-        parse_to_chunks,
-    )
+    from unstash.documents.parser import PIPELINE_VERSION  # noqa: PLC0415
     from unstash.documents.strategy import (  # noqa: PLC0415
         ParseStrategy,
         select_strategy,
@@ -171,36 +169,45 @@ async def _run_parse(
     document.mime_type = mime
 
     if strategy is ParseStrategy.EXTRACT:
-        logger.info("ingest_parse_starting", document_id=str(document.id))
-        try:
-            parsed: ParsedDocument = await asyncio.to_thread(parse_to_chunks, file_path)
-        except BaseException as exc:
-            logger.error(
-                "ingest_parse_raised",
-                document_id=str(document.id),
-                exc_type=type(exc).__name__,
-                exc_msg=str(exc),
-            )
-            raise
-        logger.info(
-            "ingest_parse_finished",
-            document_id=str(document.id),
-            chunks=len(parsed.chunks),
-        )
-        for parsed_chunk in parsed.chunks:
-            session.add(
-                Chunk(
-                    org_id=document.org_id,
-                    document_id=document.id,
-                    chunk_index=parsed_chunk.chunk_index,
-                    text=parsed_chunk.text,
-                    token_count=parsed_chunk.token_count,
-                    char_offset_start=parsed_chunk.char_offset_start,
-                    char_offset_end=parsed_chunk.char_offset_end,
-                ),
-            )
+        parsed = await _docling_parse(document, file_path)
+        _persist_chunks(session, document, parsed)
         document.pipeline_version = parsed.pipeline_version
         document.pipeline_config = parsed.pipeline_config
+        return
+
+    if strategy is ParseStrategy.CONVERT_THEN_EXTRACT:
+        from unstash.config import get_settings  # noqa: PLC0415
+        from unstash.documents.conversion import convert_to_pdf  # noqa: PLC0415
+
+        settings = get_settings()
+        logger.info(
+            "ingest_conversion_starting",
+            document_id=str(document.id),
+            detected_mime=mime,
+        )
+        pdf_bytes = await convert_to_pdf(
+            file_path,
+            gotenberg_url=settings.gotenberg_url,
+            timeout=settings.gotenberg_timeout_seconds,
+        )
+        # Keep the converted PDF beside the original so a future
+        # re-parse doesn't have to reconvert.
+        converted_path = file_path.parent / "converted.pdf"
+        await asyncio.to_thread(converted_path.write_bytes, pdf_bytes)
+        logger.info(
+            "ingest_conversion_finished",
+            document_id=str(document.id),
+            pdf_bytes=len(pdf_bytes),
+        )
+
+        parsed = await _docling_parse(document, converted_path)
+        _persist_chunks(session, document, parsed)
+        document.pipeline_version = f"{parsed.pipeline_version} (converted via gotenberg)"
+        document.pipeline_config = {
+            **parsed.pipeline_config,
+            "converted_via": "gotenberg",
+            "source_mime": mime,
+        }
         return
 
     if strategy is ParseStrategy.METADATA_ONLY:
@@ -211,18 +218,60 @@ async def _run_parse(
         document.pipeline_config = {"strategy": "metadata_only", "detected_mime": mime}
         return
 
-    if strategy is ParseStrategy.CONVERT_THEN_EXTRACT:
-        # Gotenberg sidecar lands in M3-B PR 2. Until then we treat
-        # legacy office formats as "not yet supported" so they fail
-        # loudly rather than silently producing zero chunks.
-        msg = f"Legacy office format not yet supported: {mime}"
-        raise NotImplementedError(msg)
-
     # Unsupported or actively suspicious. Fail with an actionable
     # parsing_error so the operator can see why and either re-upload
     # in a supported format or escalate.
     msg = f"Unsupported MIME type: {mime}"
     raise ValueError(msg)
+
+
+async def _docling_parse(document: Document, path: Path) -> ParsedDocument:
+    """Run Docling over a file path, off the event loop, with logging.
+
+    Shared by the ``EXTRACT`` path (native PDF, text, and OOXML) and the
+    ``CONVERT_THEN_EXTRACT`` path (legacy office already turned into a
+    PDF by Gotenberg). The parser import is function-scoped so only the
+    worker pays the Docling + transformers + torch load cost.
+    """
+    from unstash.documents.parser import parse_to_chunks  # noqa: PLC0415
+
+    logger.info("ingest_parse_starting", document_id=str(document.id))
+    try:
+        parsed = await asyncio.to_thread(parse_to_chunks, path)
+    except BaseException as exc:
+        logger.error(
+            "ingest_parse_raised",
+            document_id=str(document.id),
+            exc_type=type(exc).__name__,
+            exc_msg=str(exc),
+        )
+        raise
+    logger.info(
+        "ingest_parse_finished",
+        document_id=str(document.id),
+        chunks=len(parsed.chunks),
+    )
+    return parsed
+
+
+def _persist_chunks(
+    session: AsyncSession,
+    document: Document,
+    parsed: ParsedDocument,
+) -> None:
+    """Insert the parsed chunks for a document (embeddings stay NULL)."""
+    for parsed_chunk in parsed.chunks:
+        session.add(
+            Chunk(
+                org_id=document.org_id,
+                document_id=document.id,
+                chunk_index=parsed_chunk.chunk_index,
+                text=parsed_chunk.text,
+                token_count=parsed_chunk.token_count,
+                char_offset_start=parsed_chunk.char_offset_start,
+                char_offset_end=parsed_chunk.char_offset_end,
+            ),
+        )
 
 
 def _resolve_final_status(document: Document) -> str:

@@ -75,6 +75,24 @@ def container_host_port(postgres_container: PostgresContainer) -> tuple[str, int
     return host, port
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _warm_docling_models() -> None:
+    """Load the lru-cached Docling converter + chunker once per session.
+
+    The models are otherwise cold-loaded (and downloaded) inside the
+    first parsing test's poll window, which on a constrained CI runner
+    can exceed the poll deadline, abandon the parse task, and cascade
+    into unrelated tests. Warming them up front pays that one-time cost
+    outside any single test's timing budget.
+    """
+    # Deferred so the heavy Docling + torch import is only paid when the
+    # integration session actually runs (not at collection time).
+    from unstash.documents.parser import _get_chunker, _get_converter  # noqa: PLC0415
+
+    _get_converter()
+    _get_chunker()
+
+
 def _set_env_to_container(
     monkeypatch: pytest.MonkeyPatch,
     host: str,
