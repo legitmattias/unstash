@@ -120,6 +120,10 @@ jobs:
           SECRETS_DIR: ${{ vars.SECRETS_DIR }}
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          # Free space for the incoming images before pulling; unused
+          # images are re-pullable from GHCR, running containers keep
+          # theirs. The host disk cannot hold many image generations.
+          docker image prune -a -f
           docker compose -p unstash-staging -f compose.yaml -f compose.staging.yaml pull
           # Migrations must complete before the new app code starts serving.
           docker compose -p unstash-staging -f compose.yaml -f compose.staging.yaml up -d postgres redis
@@ -129,7 +133,7 @@ jobs:
       - name: Prune old images
         env:
           DOCKER_HOST: ssh://${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
-        run: docker image prune -a -f --filter "until=72h"
+        run: docker image prune -a -f
 
       - name: Health check
         run: |
@@ -172,6 +176,10 @@ jobs:
           SECRETS_DIR: ${{ vars.SECRETS_DIR }}
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          # Free space for the incoming images before pulling; unused
+          # images are re-pullable from GHCR, running containers keep
+          # theirs. The host disk cannot hold many image generations.
+          docker image prune -a -f
           docker compose -p unstash-production -f compose.yaml -f compose.production.yaml pull
           # Migrations must complete before the new app code starts serving.
           docker compose -p unstash-production -f compose.yaml -f compose.production.yaml up -d postgres redis
@@ -181,7 +189,7 @@ jobs:
       - name: Prune old images
         env:
           DOCKER_HOST: ssh://${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
-        run: docker image prune -a -f --filter "until=72h"
+        run: docker image prune -a -f
 
       - name: Health check
         run: |
