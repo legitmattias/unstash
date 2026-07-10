@@ -59,13 +59,18 @@ services:
       UNSTASH_LOG_LEVEL: DEBUG
     volumes:
       - /mnt/unstash-data-staging/documents:/var/unstash/documents
-    command: ["taskiq", "worker", "unstash.tasks:broker"]
+      # HuggingFace + Docling model cache (~3 GB after first parse).
+      # Named volume so the download survives container recreates.
+      - worker_model_cache:/home/unstash/.cache
+    command: ["taskiq", "worker", "--workers", "1", "unstash.tasks:broker"]
     restart: unless-stopped
     deploy:
       resources:
         limits:
-          memory: 384M
-          cpus: "0.75"
+          # One worker process loading Docling layout + tableformer
+          # models needs ~2 GB resident. Headroom for parse buffers.
+          memory: 2500M
+          cpus: "1.0"
 
   postgres:
     image: ${POSTGRES_IMAGE:-ghcr.io/legitmattias/unstash-postgres}:${IMAGE_TAG:-staging}
@@ -91,6 +96,9 @@ services:
         limits:
           memory: 64M
           cpus: "0.25"
+
+volumes:
+  worker_model_cache:
 
 secrets:
   database_password:

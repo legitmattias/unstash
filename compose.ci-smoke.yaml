@@ -9,10 +9,14 @@
 # from $SECRETS_DIR — without environment-specific concerns (ports, resource
 # limits, restart policies).
 #
-# Usage from the CI job:
+# Usage from the CI job (migrate first — the api's schema-at-head startup
+# check fails against an unmigrated database):
 #   SECRETS_DIR=/tmp/secrets docker compose \
 #     -f compose.yaml -f compose.ci-smoke.yaml \
-#     -p unstash-ci-smoke up -d postgres api
+#     -p unstash-ci-smoke run --rm api alembic upgrade head
+#   SECRETS_DIR=/tmp/secrets docker compose \
+#     -f compose.yaml -f compose.ci-smoke.yaml \
+#     -p unstash-ci-smoke up -d api
 
 services:
   # Frontend is not exercised by the smoke test, but compose validates every
@@ -51,6 +55,7 @@ services:
       UNSTASH_LOG_LEVEL: INFO
     volumes:
       - documents:/var/unstash/documents
+      - worker_model_cache:/home/unstash/.cache
     command: ["taskiq", "worker", "unstash.tasks:broker"]
 
   postgres:
@@ -66,6 +71,7 @@ services:
 
 volumes:
   documents:
+  worker_model_cache:
 
 secrets:
   database_password:

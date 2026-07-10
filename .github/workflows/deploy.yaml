@@ -57,8 +57,8 @@ jobs:
             ${{ env.API_IMAGE }}:${{ github.sha }}
             ${{ env.API_IMAGE }}:staging
             ${{ env.API_IMAGE }}:production
-          cache-from: type=gha,scope=api
-          cache-to: type=gha,scope=api,mode=max
+          cache-from: type=registry,ref=${{ env.API_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.API_IMAGE }}:buildcache,mode=max
 
       - name: Build and push Web image
         uses: docker/build-push-action@v6
@@ -71,8 +71,8 @@ jobs:
             ${{ env.WEB_IMAGE }}:${{ github.sha }}
             ${{ env.WEB_IMAGE }}:staging
             ${{ env.WEB_IMAGE }}:production
-          cache-from: type=gha,scope=web
-          cache-to: type=gha,scope=web,mode=max
+          cache-from: type=registry,ref=${{ env.WEB_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.WEB_IMAGE }}:buildcache,mode=max
 
       - name: Build and push Postgres image
         uses: docker/build-push-action@v6
@@ -84,8 +84,8 @@ jobs:
             ${{ env.POSTGRES_IMAGE }}:${{ github.sha }}
             ${{ env.POSTGRES_IMAGE }}:staging
             ${{ env.POSTGRES_IMAGE }}:production
-          cache-from: type=gha,scope=postgres
-          cache-to: type=gha,scope=postgres,mode=max
+          cache-from: type=registry,ref=${{ env.POSTGRES_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.POSTGRES_IMAGE }}:buildcache,mode=max
 
   # ── Deploy to staging (auto on push to development) ──────
   deploy-staging:
@@ -120,8 +120,20 @@ jobs:
           SECRETS_DIR: ${{ vars.SECRETS_DIR }}
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          # Free space for the incoming images before pulling; unused
+          # images are re-pullable from GHCR, running containers keep
+          # theirs. The host disk cannot hold many image generations.
+          docker image prune -a -f
           docker compose -p unstash-staging -f compose.yaml -f compose.staging.yaml pull
+          # Migrations must complete before the new app code starts serving.
+          docker compose -p unstash-staging -f compose.yaml -f compose.staging.yaml up -d postgres redis
+          docker compose -p unstash-staging -f compose.yaml -f compose.staging.yaml run --rm api alembic upgrade head
           docker compose -p unstash-staging -f compose.yaml -f compose.staging.yaml up -d
+
+      - name: Prune old images
+        env:
+          DOCKER_HOST: ssh://${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+        run: docker image prune -a -f
 
       - name: Health check
         run: |
@@ -164,8 +176,20 @@ jobs:
           SECRETS_DIR: ${{ vars.SECRETS_DIR }}
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          # Free space for the incoming images before pulling; unused
+          # images are re-pullable from GHCR, running containers keep
+          # theirs. The host disk cannot hold many image generations.
+          docker image prune -a -f
           docker compose -p unstash-production -f compose.yaml -f compose.production.yaml pull
+          # Migrations must complete before the new app code starts serving.
+          docker compose -p unstash-production -f compose.yaml -f compose.production.yaml up -d postgres redis
+          docker compose -p unstash-production -f compose.yaml -f compose.production.yaml run --rm api alembic upgrade head
           docker compose -p unstash-production -f compose.yaml -f compose.production.yaml up -d
+
+      - name: Prune old images
+        env:
+          DOCKER_HOST: ssh://${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+        run: docker image prune -a -f
 
       - name: Health check
         run: |

@@ -48,6 +48,8 @@ services:
     volumes:
       - ./backend/src:/app/src:ro
       - documents:/var/unstash/documents
+      # HuggingFace + Docling model cache (~3 GB after first parse).
+      - worker_model_cache:/home/unstash/.cache
     secrets:
       - database_password
       - database_migrations_password
@@ -82,6 +84,7 @@ services:
 
 volumes:
   documents:
+  worker_model_cache:
 
 secrets:
   database_password:

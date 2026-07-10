@@ -1,12 +1,13 @@
 # Custom PostgreSQL image for Unstash.
 #
-# Base: pgvector/pgvector:pg17 (PostgreSQL 17 with pgvector preinstalled).
+# Base: pgvector/pgvector (PostgreSQL 17 with pgvector preinstalled).
 # Adds: pgvectorscale (Timescale DiskANN index) and pg_search (ParadeDB BM25).
 # Bakes in the database initialization script that creates the Unstash roles.
 #
 # All versions are pinned for reproducibility — bump deliberately.
+# pgvector must stay >= 0.8.2 (CVE-2026-3172).
 
-FROM pgvector/pgvector:pg17
+FROM pgvector/pgvector:0.8.2-pg17
 
 ARG PG_MAJOR=17
 ARG PGVECTORSCALE_VERSION=0.9.0

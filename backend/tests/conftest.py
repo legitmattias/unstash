@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import tempfile
+from pathlib import Path
 
 # Force the in-memory Taskiq broker for all tests. The broker module
 # reads this env var at import time and chooses InMemoryBroker over
@@ -13,13 +15,22 @@ import os
 # fixture; tests that merely import the module do not.
 os.environ.setdefault("UNSTASH_TASKIQ_IN_MEMORY", "1")
 
-from typing import TYPE_CHECKING
+# Redirect the HuggingFace tokenizer cache to a dedicated test cache
+# directory so the operator's personal HF cache (often owned by root
+# from prior tool runs) is never read or written. The cache is
+# shared across the test session: once one test downloads the
+# tokenizer, subsequent tests hit it locally.
+_HF_CACHE = Path(tempfile.gettempdir()) / "unstash-test-hf-cache"
+_HF_CACHE.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("HF_HOME", str(_HF_CACHE))
 
-import pytest
-from httpx import ASGITransport, AsyncClient
+from typing import TYPE_CHECKING  # noqa: E402
 
-from unstash.config import Settings, get_settings
-from unstash.main import create_app
+import pytest  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+
+from unstash.config import Settings, get_settings  # noqa: E402
+from unstash.main import create_app  # noqa: E402
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

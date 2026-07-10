@@ -159,7 +159,9 @@ async def test_upload_round_trip(
     # returned (await_inplace=False is the default — the test relies
     # on either the broker dispatching synchronously or on a poll).
     # We poll the monitoring routes briefly to catch the transition.
-    for _ in range(20):
+    # Real parsing takes a couple of seconds in CI (model load +
+    # Docling extract); 30 s ceiling is generous.
+    for _ in range(600):
         doc = await app_client.get(f"/api/orgs/acme/documents/{document_id}")
         assert doc.status_code == 200
         if doc.json()["status"] == "parsed":

@@ -3,6 +3,15 @@
 # ---------------------------------------------------------------------------
 FROM python:3.13-slim AS builder
 
+# libmagic1 is needed at runtime by python-magic (used for content-based
+# MIME detection during ingestion). Installed in the builder so both the
+# dev image (which extends builder) and the runtime image (which only
+# copies the venv) work — the runtime stage installs it again on its
+# own slim base.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libmagic1 && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 ENV UV_COMPILE_BYTECODE=1 \
@@ -44,23 +53,48 @@ CMD ["uv", "run", "uvicorn", "unstash.main:app", "--host", "0.0.0.0", "--port", 
 # ---------------------------------------------------------------------------
 FROM python:3.13-slim AS runtime
 
+# libmagic1: python-magic MIME detection (import works, calls fail
+#   without it).
+# libxcb1, libxext6, libsm6, libice6, libglib2.0-0, libgl1: pulled in
+#   indirectly by Docling's image-processing path (opencv-headless,
+#   PIL, etc.) at parse time.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libmagic1 \
+        libxcb1 \
+        libxext6 \
+        libsm6 \
+        libice6 \
+        libglib2.0-0 \
+        libgl1 && \
+    rm -rf /var/lib/apt/lists/*
+
 # Pin the runtime UID/GID to 1000 so host bind-mounts (e.g. the
 # documents data volume on the VPS, owned by the operator's local
 # uid 1000) are writable by the container without chmod gymnastics.
 # A system account is still appropriate — no login shell, no home —
 # but we make the numeric uid explicit and stable across rebuilds.
+# The home directory matters here because the model caches we
+# warm below land under $HOME — so we DO create it and set it to /app.
 RUN groupadd --system --gid 1000 unstash && \
-    useradd --system --uid 1000 --gid unstash --home-dir /app --no-create-home unstash
+    useradd --system --uid 1000 --gid unstash --home-dir /home/unstash --create-home unstash && \
+    mkdir -p /home/unstash/.cache/huggingface && \
+    chown -R unstash:unstash /home/unstash/.cache
 
 WORKDIR /app
 
-COPY --from=builder /app/.venv /app/.venv
-COPY --from=builder /app/alembic.ini /app/alembic.ini
-COPY --from=builder /app/alembic /app/alembic
+COPY --from=builder --chown=unstash:unstash /app/.venv /app/.venv
+COPY --from=builder --chown=unstash:unstash /app/alembic.ini /app/alembic.ini
+COPY --from=builder --chown=unstash:unstash /app/alembic /app/alembic
 
 ENV PATH="/app/.venv/bin:$PATH"
 
 USER unstash
+
+# HuggingFace + Docling model cache. Mount point pre-created with
+# unstash ownership in the useradd RUN block above so the named
+# docker volume mounted here at runtime is writable by the worker.
+ENV HF_HOME=/home/unstash/.cache/huggingface
 
 EXPOSE 8000
 
