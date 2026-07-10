@@ -161,9 +161,15 @@ async def _poll_until_terminal(
     slug: str,
     document_id: str,
     *,
-    deadline_seconds: float = 60.0,
+    deadline_seconds: float = 180.0,
 ) -> dict:
-    """Poll the document until status is terminal (parsed/failed/indexed)."""
+    """Poll the document until status is terminal (parsed/failed/indexed).
+
+    The ceiling is generous because the first parsing test in a run
+    cold-loads the Docling models (lru_cached, paid once per process),
+    which is slow on constrained CI runners. A too-tight deadline would
+    abandon a still-running parse and starve later tests.
+    """
     async with asyncio.timeout(deadline_seconds):
         while True:
             response = await client.get(f"/api/orgs/{slug}/documents/{document_id}")

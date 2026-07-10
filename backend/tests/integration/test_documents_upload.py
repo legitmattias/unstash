@@ -155,18 +155,18 @@ async def test_upload_round_trip(
     document_id = body["document_id"]
     job_id = body["job_id"]
 
-    # The stub task ran inline via the InMemoryBroker before kiq()
-    # returned (await_inplace=False is the default — the test relies
-    # on either the broker dispatching synchronously or on a poll).
-    # We poll the monitoring routes briefly to catch the transition.
-    # Real parsing takes a couple of seconds in CI (model load +
-    # Docling extract); 30 s ceiling is generous.
-    for _ in range(600):
+    # Poll the monitoring route for the parse transition. The first
+    # parsing test in a run cold-loads the Docling models (lru_cached,
+    # so this cost is paid once per process). On a constrained CI runner
+    # that cold load can take well over a minute, so the ceiling is
+    # generous — a too-tight deadline would abandon a still-running parse
+    # task and starve the tests that follow it.
+    for _ in range(1800):
         doc = await app_client.get(f"/api/orgs/acme/documents/{document_id}")
         assert doc.status_code == 200
         if doc.json()["status"] == "parsed":
             break
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.1)
     else:
         pytest.fail(f"document never reached parsed, last body: {doc.json()}")
 
