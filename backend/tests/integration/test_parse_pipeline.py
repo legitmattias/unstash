@@ -39,6 +39,7 @@ from unstash.auth.manager import _password_helper
 from unstash.config import get_settings
 from unstash.db.engine import dispose_engine, get_admin_engine, get_engine
 from unstash.db.session import get_admin_sessionmaker, get_sessionmaker
+from unstash.documents.conversion import ConversionError
 from unstash.main import create_app
 
 if TYPE_CHECKING:
@@ -336,3 +337,128 @@ async def test_mime_detection_overrides_declared_type(
     assert document["status"] == "parsed", document
     # The detected MIME has overwritten the declared one.
     assert document["mime_type"] == "application/pdf"
+
+
+async def test_legacy_office_converts_then_parses(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A legacy office file is converted to PDF, then parsed into chunks.
+
+    MIME detection is forced to a legacy format so the strategy router
+    picks CONVERT_THEN_EXTRACT, and the Gotenberg call is stubbed to
+    return a real synthetic PDF — so the conversion boundary is faked
+    but the whole downstream Docling parse + chunk persistence is real.
+    """
+    monkeypatch.setattr(
+        "unstash.documents.mime.detect_mime",
+        lambda _path: "application/msword",
+    )
+    converted = tmp_path / "converted_source.pdf"
+    _make_synthetic_pdf(
+        converted,
+        ["Converted legacy protocol.", "Board discussed the roof."],
+    )
+    converted_bytes = converted.read_bytes()
+
+    async def _fake_convert(
+        _source: Path,
+        *,
+        gotenberg_url: str,
+        timeout: float,  # noqa: ASYNC109 — mirrors the real convert_to_pdf signature
+    ) -> bytes:
+        assert gotenberg_url  # settings wired through
+        assert timeout > 0
+        return converted_bytes
+
+    monkeypatch.setattr(
+        "unstash.documents.conversion.convert_to_pdf",
+        _fake_convert,
+    )
+
+    user_a = await _seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
+    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
+    await _seed_membership(migrations_pool, user_a, acme_id)
+
+    legacy = tmp_path / "protocol.doc"
+    legacy.write_bytes(b"pretend legacy word document bytes")
+
+    await _login(app_client, USER_EMAIL, USER_PASSWORD)
+    with legacy.open("rb") as fh:
+        response = await app_client.post(
+            "/api/orgs/acme/documents",
+            files={"file": ("protocol.doc", fh, "application/msword")},
+        )
+    assert response.status_code == 201, response.text
+    document_id = response.json()["document_id"]
+
+    document = await _poll_until_terminal(app_client, "acme", document_id)
+    assert document["status"] == "parsed", document
+    assert document["pipeline_config"]["converted_via"] == "gotenberg"
+    assert document["pipeline_config"]["source_mime"] == "application/msword"
+
+    async with migrations_pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT text, embedding IS NULL AS no_embedding "
+            "FROM chunks WHERE document_id = $1 ORDER BY chunk_index",
+            uuid.UUID(document_id),
+        )
+    assert len(rows) >= 1
+    assert all(row["no_embedding"] for row in rows)
+    combined = " ".join(row["text"] for row in rows).lower()
+    assert "protocol" in combined or "roof" in combined
+
+
+async def test_conversion_failure_lands_in_failed_state(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Gotenberg failure transitions the document to ``failed``.
+
+    The conversion error propagates through the normal exception path,
+    so the document ends ``failed`` with the reason in ``parsing_error``
+    and the worker keeps running.
+    """
+    monkeypatch.setattr(
+        "unstash.documents.mime.detect_mime",
+        lambda _path: "application/msword",
+    )
+
+    async def _failing_convert(
+        _source: Path,
+        *,
+        gotenberg_url: str,
+        timeout: float,  # noqa: ASYNC109 — mirrors the real convert_to_pdf signature
+    ) -> bytes:
+        _ = gotenberg_url, timeout
+        msg = "Gotenberg returned 503: LibreOffice is unavailable"
+        raise ConversionError(msg)
+
+    monkeypatch.setattr(
+        "unstash.documents.conversion.convert_to_pdf",
+        _failing_convert,
+    )
+
+    user_a = await _seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
+    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
+    await _seed_membership(migrations_pool, user_a, acme_id)
+
+    legacy = tmp_path / "protocol.doc"
+    legacy.write_bytes(b"pretend legacy word document bytes")
+
+    await _login(app_client, USER_EMAIL, USER_PASSWORD)
+    with legacy.open("rb") as fh:
+        response = await app_client.post(
+            "/api/orgs/acme/documents",
+            files={"file": ("protocol.doc", fh, "application/msword")},
+        )
+    assert response.status_code == 201
+    document_id = response.json()["document_id"]
+
+    document = await _poll_until_terminal(app_client, "acme", document_id)
+    assert document["status"] == "failed", document
+    assert "ConversionError" in document["parsing_error"]

@@ -108,6 +108,20 @@ class Settings(BaseSettings):
         description="Maximum upload size per document, in bytes.",
     )
 
+    # -- Gotenberg (legacy office -> PDF conversion sidecar) -------------------
+    # The worker posts CONVERT_THEN_EXTRACT documents here; Docling then
+    # parses the returned PDF. Reachable only on the internal Docker network.
+
+    gotenberg_url: str = Field(
+        default="http://gotenberg:3000",
+        description="Base URL of the Gotenberg conversion sidecar.",
+    )
+    gotenberg_timeout_seconds: float = Field(
+        default=120.0,
+        gt=0,
+        description="HTTP timeout for a single Gotenberg conversion request.",
+    )
+
     # -- External APIs ---------------------------------------------------------
     # Added when their respective features are implemented.
 
