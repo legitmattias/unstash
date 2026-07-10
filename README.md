@@ -19,24 +19,24 @@ Unstash is built on a hybrid architecture that combines classical information re
 
 | Layer | Technology |
 |---|---|
-| Frontend | SvelteKit + TypeScript, Open Props, Bits UI |
-| Backend | FastAPI + Python 3.12+ |
+| Frontend | SvelteKit + TypeScript (migration to Next.js planned — ADR 0007) |
+| Backend | FastAPI + Python 3.13 |
 | Database | PostgreSQL 17 + pgvector + pgvectorscale + ParadeDB pg_search |
-| Parsing | Docling + LibreOffice + EasyOCR |
+| Parsing | Docling + Gotenberg + EasyOCR |
 | Embeddings | Jina AI v4 |
 | Clustering | BERTopic |
 | Classification | scikit-learn (calibrated logistic regression) |
 | NER | KB-BERT (Swedish) + GLiNER (zero-shot) |
 | Reranking | BGE-reranker-v2-m3 |
-| LLM | Mistral Large 2 |
+| LLM | Mistral (EU-hosted), called surgically |
 | Job queue | Taskiq + Redis |
 | Infrastructure | Docker Compose, Caddy |
 
-See `docs/adr/0001-initial-stack-choices.md` for rationale.
+See `docs/adr/` for decision records; `0001-initial-stack-choices.md` covers the initial rationale and later ADRs record amendments.
 
 ## Status
 
-Pre-MVP. Project bootstrap in progress.
+Pre-MVP, in active development. Multi-tenant schema with row-level security, authentication, and the document ingestion pipeline (upload → parse → chunk) are in place; embeddings, hybrid search, and classification are the next milestones.
 
 ## Repository layout
 
