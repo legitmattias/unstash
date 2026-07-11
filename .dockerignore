@@ -1,0 +1,36 @@
+# Build context excludes. The api and frontend images build from the repo
+# root; keep VCS, local secrets, and generated caches out of the context.
+
+# Version control & CI
+.git
+.gitignore
+.github
+
+# Local dev secrets (dev compose reads secrets/*.txt) — never into an image
+secrets
+.env
+
+# Python caches / build artifacts
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/.coverage
+**/.coverage.*
+**/.coverage-html
+**/coverage.xml
+**/htmlcov
+**/*.egg-info
+**/.venv
+
+# Node / frontend build output (regenerated during the image build)
+**/node_modules
+frontend/.next
+frontend/.svelte-kit
+frontend/build
+
+# Editor / tooling
+.editorconfig
+.pre-commit-config.yaml
+**/.DS_Store
