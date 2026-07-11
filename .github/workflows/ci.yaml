@@ -309,6 +309,16 @@ jobs:
         working-directory: backend
         run: uv sync --frozen
 
+      - name: Cache Docling + tokenizer models
+        uses: actions/cache@v4
+        with:
+          # Docling + chunker tokenizer models (~500 MB) live under the
+          # HuggingFace cache. Keyed on the lockfile; bumps re-populate.
+          path: ~/.cache/huggingface
+          key: docling-models-${{ hashFiles('backend/uv.lock') }}
+          restore-keys: |
+            docling-models-
+
       - name: Run integration tests
         working-directory: backend
         env:

@@ -155,12 +155,7 @@ async def test_upload_round_trip(
     document_id = body["document_id"]
     job_id = body["job_id"]
 
-    # Poll the monitoring route for the parse transition. The first
-    # parsing test in a run cold-loads the Docling models (lru_cached,
-    # so this cost is paid once per process). On a constrained CI runner
-    # that cold load can take well over a minute, so the ceiling is
-    # generous — a too-tight deadline would abandon a still-running parse
-    # task and starve the tests that follow it.
+    # Generous ceiling: the first parse in a run may cold-load models.
     for _ in range(1800):
         doc = await app_client.get(f"/api/orgs/acme/documents/{document_id}")
         assert doc.status_code == 200
