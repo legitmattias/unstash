@@ -79,14 +79,11 @@ def container_host_port(postgres_container: PostgresContainer) -> tuple[str, int
 def _warm_docling_models() -> None:
     """Load the lru-cached Docling converter + chunker once per session.
 
-    The models are otherwise cold-loaded (and downloaded) inside the
-    first parsing test's poll window, which on a constrained CI runner
-    can exceed the poll deadline, abandon the parse task, and cascade
-    into unrelated tests. Warming them up front pays that one-time cost
-    outside any single test's timing budget.
+    Pays the one-time model download/load up front, outside any single
+    test's poll window.
     """
-    # Deferred so the heavy Docling + torch import is only paid when the
-    # integration session actually runs (not at collection time).
+    # Deferred so the heavy Docling + torch import only loads when the
+    # integration session runs, not at collection time.
     from unstash.documents.parser import _get_chunker, _get_converter  # noqa: PLC0415
 
     _get_converter()

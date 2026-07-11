@@ -312,13 +312,8 @@ jobs:
       - name: Cache Docling + tokenizer models
         uses: actions/cache@v4
         with:
-          # Docling (docling-layout-heron, docling-models/tableformer) and
-          # the chunker tokenizer (all-MiniLM-L6-v2) all download under the
-          # HuggingFace cache — ~500 MB. Restoring it across runs removes the
-          # cold download that otherwise dominates the first parsing test and
-          # makes the parse-poll deadlines fragile on slow runners.
-          # Keyed on the lockfile so a Docling/transformers bump re-populates;
-          # restore-keys let an older cache seed a partial hit in the meantime.
+          # Docling + chunker tokenizer models (~500 MB) live under the
+          # HuggingFace cache. Keyed on the lockfile; bumps re-populate.
           path: ~/.cache/huggingface
           key: docling-models-${{ hashFiles('backend/uv.lock') }}
           restore-keys: |

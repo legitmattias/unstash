@@ -165,10 +165,7 @@ async def _poll_until_terminal(
 ) -> dict:
     """Poll the document until status is terminal (parsed/failed/indexed).
 
-    The ceiling is generous because the first parsing test in a run
-    cold-loads the Docling models (lru_cached, paid once per process),
-    which is slow on constrained CI runners. A too-tight deadline would
-    abandon a still-running parse and starve later tests.
+    Generous ceiling: the first parse in a run may cold-load models.
     """
     async with asyncio.timeout(deadline_seconds):
         while True:
