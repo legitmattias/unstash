@@ -55,6 +55,7 @@ async def test_upgrade_head_produces_expected_table_set(
         "audit_log",
         "chunks",
         "connectors",
+        "document_metadata",
         "documents",
         "job_progress",
         "org_memberships",
