@@ -10,6 +10,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+# Written to document_metadata.extractor_version; bump when extraction
+# rules change in a way that warrants re-extraction.
+EXTRACTOR_VERSION = "regex-dates-amounts v1"
+
 _SWEDISH_MONTHS = {
     "januari": 1,
     "februari": 2,

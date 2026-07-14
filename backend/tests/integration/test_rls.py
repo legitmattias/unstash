@@ -14,7 +14,8 @@ import asyncpg
 import pytest
 
 # Tables that should have RLS enabled. Mirrors TENANT_SCOPED_TABLES in
-# backend/alembic/versions/0006_rls_policies.py.
+# backend/alembic/versions/0006_rls_policies.py, plus tenant-scoped tables
+# added by later migrations (which enable their own RLS).
 TENANT_SCOPED_TABLES: tuple[str, ...] = (
     "org_memberships",
     "documents",
@@ -23,6 +24,7 @@ TENANT_SCOPED_TABLES: tuple[str, ...] = (
     "search_logs",
     "job_progress",
     "audit_log",
+    "document_metadata",
 )
 
 

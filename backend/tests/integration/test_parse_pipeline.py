@@ -196,6 +196,7 @@ async def test_pdf_upload_produces_chunks(
             "Unstash test document — first paragraph.",
             "Second line of content here.",
             "Third line that mentions the housing cooperative's roof.",
+            "Beslut 2024-03-15: avgiften blir 1234 kr per manad.",
         ],
     )
 
@@ -235,6 +236,21 @@ async def test_pdf_upload_produces_chunks(
     job = await app_client.get(f"/api/orgs/acme/jobs/{job_id}")
     assert job.status_code == 200
     assert job.json()["status"] == "succeeded"
+
+    # Metadata extraction ran best-effort during parse: the date and the
+    # amount planted in the PDF text land in document_metadata.
+    async with migrations_pool.acquire() as conn:
+        meta = await conn.fetchrow(
+            "SELECT dates::text, amounts::text, entities, extractor_version "
+            "FROM document_metadata WHERE document_id = $1",
+            uuid.UUID(document_id),
+        )
+    assert meta is not None
+    assert "2024-03-15" in meta["dates"]
+    assert '"SEK"' in meta["amounts"]
+    assert "1234" in meta["amounts"]
+    assert meta["entities"] is None  # NER not wired yet
+    assert meta["extractor_version"]
 
 
 async def test_corrupt_file_lands_in_failed_state(

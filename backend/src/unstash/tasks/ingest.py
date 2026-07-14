@@ -22,14 +22,21 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from unstash.db.models import Chunk, Document, JobProgress
+from unstash.db.models import Chunk, Document, DocumentMetadata, JobProgress
+from unstash.documents.metadata import (
+    EXTRACTOR_VERSION,
+    extract_amounts,
+    extract_dates,
+)
 from unstash.tasks.broker import broker
 from unstash.tasks.context import org_context
 from unstash.tasks.instrumentation import peak_rss_mib, queue_depth
@@ -266,6 +273,7 @@ async def _run_parse(
         _persist_chunks(session, document, parsed)
         document.pipeline_version = parsed.pipeline_version
         document.pipeline_config = parsed.pipeline_config
+        await _extract_metadata(session, document, parsed)
         return
 
     if strategy is ParseStrategy.CONVERT_THEN_EXTRACT:
@@ -301,6 +309,7 @@ async def _run_parse(
             "converted_via": "gotenberg",
             "source_mime": mime,
         }
+        await _extract_metadata(session, document, parsed)
         return
 
     if strategy is ParseStrategy.METADATA_ONLY:
@@ -345,6 +354,51 @@ async def _docling_parse(document: Document, path: Path) -> ParsedDocument:
         chunks=len(parsed.chunks),
     )
     return parsed
+
+
+async def _extract_metadata(
+    session: AsyncSession,
+    document: Document,
+    parsed: ParsedDocument,
+) -> None:
+    """Extract dates and amounts into document_metadata, best-effort.
+
+    Failures log a warning and never fail the document — metadata is a
+    search-filter enhancement, not part of the parse contract. ``entities``
+    stays NULL until NER runs in the worker (gated on the host migration).
+    Upserts on document_id so a task retry refreshes rather than duplicates.
+    """
+    try:
+        text = "\n".join(chunk.text for chunk in parsed.chunks)
+        dates = [asdict(date) for date in extract_dates(text)]
+        amounts = [asdict(amount) for amount in extract_amounts(text)]
+        values = {
+            "dates": dates,
+            "amounts": amounts,
+            "extractor_version": EXTRACTOR_VERSION,
+        }
+        statement = (
+            pg_insert(DocumentMetadata)
+            .values(org_id=document.org_id, document_id=document.id, **values)
+            .on_conflict_do_update(
+                index_elements=["document_id"],
+                set_={**values, "updated_at": func.now()},
+            )
+        )
+        await session.execute(statement)
+        logger.info(
+            "metadata_extracted",
+            document_id=str(document.id),
+            dates=len(dates),
+            amounts=len(amounts),
+        )
+    except Exception as exc:
+        logger.warning(
+            "metadata_extraction_failed",
+            document_id=str(document.id),
+            exc_type=type(exc).__name__,
+            exc_msg=str(exc),
+        )
 
 
 def _persist_chunks(

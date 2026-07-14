@@ -15,6 +15,7 @@ from unstash.db.models.base import Base, TimestampMixin
 from unstash.db.models.chunk import Chunk
 from unstash.db.models.connector import Connector, ConnectorProvider, ConnectorStatus
 from unstash.db.models.document import Document, DocumentStatus
+from unstash.db.models.document_metadata import DocumentMetadata
 from unstash.db.models.job_progress import JobProgress, JobStatus
 from unstash.db.models.org_membership import OrgMembership, OrgRole
 from unstash.db.models.organisation import Organisation
@@ -31,6 +32,7 @@ __all__ = [
     "ConnectorProvider",
     "ConnectorStatus",
     "Document",
+    "DocumentMetadata",
     "DocumentStatus",
     "JobProgress",
     "JobStatus",
