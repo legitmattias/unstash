@@ -9,10 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from transformers import Pipeline
+from typing import Any, Protocol, cast
 
 _NER_MODEL = "KBLab/bert-base-swedish-cased-ner"
 
@@ -42,21 +39,28 @@ class ExtractedEntity:
     score: float
 
 
-@lru_cache(maxsize=1)
-def _get_pipeline() -> Pipeline:
-    """Build (or return cached) the KB-BERT NER pipeline."""
-    from transformers import (  # noqa: PLC0415
-        AutoModelForTokenClassification,
-        AutoTokenizer,
-        pipeline,
-    )
+class _NerPipeline(Protocol):
+    """The slice of transformers' NER pipeline surface we call."""
 
+    def __call__(self, text: str) -> list[dict[str, Any]]: ...
+
+
+@lru_cache(maxsize=1)
+def _get_pipeline() -> _NerPipeline:
+    """Build (or return cached) the KB-BERT NER pipeline."""
+    from transformers import pipeline  # noqa: PLC0415
+
+    # transformers publishes no usable types for pipeline(); the runtime
+    # call is covered by the real-model integration test.
     # aggregation_strategy glues sub-word tokens into whole-entity spans.
-    return pipeline(
-        "ner",
-        model=AutoModelForTokenClassification.from_pretrained(_NER_MODEL),  # pyright: ignore[reportUnknownArgumentType]
-        tokenizer=AutoTokenizer.from_pretrained(_NER_MODEL),  # pyright: ignore[reportUnknownArgumentType]
-        aggregation_strategy="first",
+    return cast(
+        "_NerPipeline",
+        pipeline(  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
+            "ner",  # pyright: ignore[reportArgumentType]
+            model=_NER_MODEL,
+            tokenizer=_NER_MODEL,
+            aggregation_strategy="first",
+        ),
     )
 
 
