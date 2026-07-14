@@ -184,6 +184,9 @@ filterwarnings = [
     # that we don't control.
     "ignore::FutureWarning:transformers.*",
     "ignore::UserWarning:transformers.*",
+    # KB-BERT ships a slow WordPiece tokenizer; loading it trips a
+    # tokenizers deprecation we don't control.
+    "ignore:Deprecated in 0.9.0:DeprecationWarning",
 ]
 
 [tool.coverage.run]
