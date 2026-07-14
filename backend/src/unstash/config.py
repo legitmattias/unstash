@@ -122,6 +122,23 @@ class Settings(BaseSettings):
         description="HTTP timeout for a single Gotenberg conversion request.",
     )
 
+    # -- Embeddings (Jina) ----------------------------------------------------
+    # ``embedder_backend='fake'`` selects the deterministic offline embedder
+    # for tests and the CI smoke flow. ``jina_embedding_dimensions`` must match
+    # the chunks.embedding column width (see EMBEDDING_DIM in the chunk model).
+
+    embedder_backend: str = Field(
+        default="jina",
+        description="Embedding backend: 'jina' (real) or 'fake' (deterministic).",
+    )
+    jina_base_url: str = Field(
+        default="https://api.jina.ai/v1",
+        description="Base URL of the Jina embeddings API.",
+    )
+    jina_embedding_model: str = Field(default="jina-embeddings-v4")
+    jina_embedding_dimensions: int = Field(default=2048, gt=0)
+    jina_timeout_seconds: float = Field(default=60.0, gt=0)
+
     # -- External APIs ---------------------------------------------------------
     # Added when their respective features are implemented.
 

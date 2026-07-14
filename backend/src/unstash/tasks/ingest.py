@@ -1,28 +1,21 @@
-"""Ingestion task — Phase B body.
+"""Ingestion tasks — parse, then embed.
 
-The job:
+Ingest runs as two chained Taskiq tasks so a crash in one half does not
+redo the other:
 
-1. Loads the document row and the matching job_progress row.
-2. Sets document.status to ``parsing`` and job.status to ``running``.
-3. Sniffs the file's MIME type, picks a parse strategy, and dispatches:
+``ingest_document`` (parse): sniffs the MIME type, routes via the
+strategy router, and produces chunks with NULL embedding — EXTRACT via
+Docling, CONVERT_THEN_EXTRACT via Gotenberg then Docling, METADATA_ONLY
+records provenance only, SKIP fails with a reason. On success it commits,
+sets the document to ``parsed``, and queues ``embed_document``.
 
-   - ``EXTRACT``: parse with Docling, run HybridChunker, insert chunks
-     with NULL embedding (M3-C fills embeddings later). Sets
-     ``document.status = 'parsed'``.
-   - ``CONVERT_THEN_EXTRACT``: convert the legacy office file to PDF via
-     the Gotenberg sidecar, then run it through the same Docling PDF
-     path as ``EXTRACT``.
-   - ``METADATA_ONLY``: skip chunking; mark ``parsed`` (the document
-     is recognised, just not chunkable). Phase D may add metadata
-     extraction here.
-   - ``SKIP``: mark ``failed`` with an explanation in
-     ``document.parsing_error``.
+``embed_document`` (embed + index): embeds the document's NULL-embedding
+chunks and moves it to ``indexed``. Idempotent — a retry finishes the
+remaining chunks without re-parsing.
 
-4. On any uncaught exception during parsing, transitions the document
-   to ``failed`` and captures the error in ``parsing_error``. The
-   transaction is committed even for failure so the operator-visible
-   state is consistent; the task itself surfaces the exception so
-   Taskiq's retry/dead-letter logic can still apply.
+Either task, on an uncaught exception, transitions the document to
+``failed`` with the reason in ``parsing_error`` and commits so the
+operator-visible state stays consistent.
 """
 
 from __future__ import annotations
@@ -53,6 +46,10 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger(__name__)
 
+# Chunks per Jina request. Larger = fewer calls; start conservative and
+# tune against observed latency/cost.
+_EMBED_BATCH_SIZE = 32
+
 
 @broker.task
 async def ingest_document(
@@ -60,11 +57,17 @@ async def ingest_document(
     document_id_str: str,
     job_id_str: str,
 ) -> None:
-    """Drive a document through the M3-B parse lifecycle."""
+    """Parse a document into chunks, then queue embedding.
+
+    On a successful parse the transaction commits and ``embed_document``
+    is queued afterwards, so the embed task never races ahead of the
+    chunks it reads.
+    """
     org_id = uuid.UUID(org_id_str)
     document_id = uuid.UUID(document_id_str)
     job_id = uuid.UUID(job_id_str)
 
+    parsed_ok = False
     async with org_context(org_id) as session:
         document = await session.get(Document, document_id)
         job = await session.get(JobProgress, job_id)
@@ -95,7 +98,6 @@ async def ingest_document(
         file_path = Path(document.source_uri)
         try:
             await _run_parse(session, document, file_path)
-            document.status = _resolve_final_status(document)
         except Exception as exc:
             finished = datetime.now(UTC)
             logger.info(
@@ -115,17 +117,109 @@ async def ingest_document(
             await session.flush()
             return
 
-        finished = datetime.now(UTC)
-        job.status = "succeeded"
-        job.finished_at = finished
+        document.status = "parsed"
         chunk_count = await session.scalar(
             select(func.count(Chunk.id)).where(Chunk.document_id == document.id),
         )
         logger.info(
-            "ingest_document_completed",
+            "ingest_parse_completed",
             org_id=str(org_id),
             document_id=str(document_id),
             chunks=chunk_count,
+            duration_ms=round((datetime.now(UTC) - started).total_seconds() * 1000),
+            peak_rss_mib=round(peak_rss_mib(), 1),
+        )
+        parsed_ok = True
+
+    if parsed_ok:
+        await embed_document.kiq(org_id_str, document_id_str, job_id_str)
+
+
+@broker.task
+async def embed_document(
+    org_id_str: str,
+    document_id_str: str,
+    job_id_str: str,
+) -> None:
+    """Embed a parsed document's chunks and mark it indexed.
+
+    Idempotent: only chunks with a NULL embedding are embedded, so a
+    retry after a mid-embed crash finishes the remaining chunks without
+    re-parsing.
+    """
+    from unstash.config import get_settings  # noqa: PLC0415
+    from unstash.documents.embedder import (  # noqa: PLC0415
+        EmbeddingTask,
+        get_embedder,
+    )
+
+    org_id = uuid.UUID(org_id_str)
+    document_id = uuid.UUID(document_id_str)
+    job_id = uuid.UUID(job_id_str)
+
+    async with org_context(org_id) as session:
+        document = await session.get(Document, document_id)
+        job = await session.get(JobProgress, job_id)
+        if document is None or job is None:
+            logger.warning(
+                "embed_document_target_missing",
+                org_id=str(org_id),
+                document_id=str(document_id),
+                job_id=str(job_id),
+                document_present=document is not None,
+                job_present=job is not None,
+            )
+            return
+
+        started = datetime.now(UTC)
+        result = await session.execute(
+            select(Chunk)
+            .where(Chunk.document_id == document.id, Chunk.embedding.is_(None))
+            .order_by(Chunk.chunk_index),
+        )
+        pending = list(result.scalars())
+
+        embedder = get_embedder(get_settings())
+        total_tokens = 0
+        try:
+            for start in range(0, len(pending), _EMBED_BATCH_SIZE):
+                batch = pending[start : start + _EMBED_BATCH_SIZE]
+                embedded = await embedder.embed(
+                    [chunk.text for chunk in batch],
+                    task=EmbeddingTask.PASSAGE,
+                )
+                for chunk, vector in zip(batch, embedded.vectors, strict=True):
+                    chunk.embedding = vector
+                total_tokens += embedded.total_tokens
+        except Exception as exc:
+            finished = datetime.now(UTC)
+            logger.info(
+                "embed_document_failed",
+                org_id=str(org_id),
+                document_id=str(document_id),
+                exc_type=type(exc).__name__,
+                exc_msg=str(exc),
+                duration_ms=round((finished - started).total_seconds() * 1000),
+            )
+            document.status = "failed"
+            document.parsing_error = f"{type(exc).__name__}: {exc}"
+            job.status = "failed"
+            job.error = document.parsing_error
+            job.finished_at = finished
+            await session.flush()
+            return
+
+        finished = datetime.now(UTC)
+        document.status = "indexed"
+        document.indexed_at = finished
+        job.status = "succeeded"
+        job.finished_at = finished
+        logger.info(
+            "embed_document_completed",
+            org_id=str(org_id),
+            document_id=str(document_id),
+            embedded_chunks=len(pending),
+            total_tokens=total_tokens,
             duration_ms=round((finished - started).total_seconds() * 1000),
             peak_rss_mib=round(peak_rss_mib(), 1),
         )
@@ -272,11 +366,3 @@ def _persist_chunks(
                 char_offset_end=parsed_chunk.char_offset_end,
             ),
         )
-
-
-def _resolve_final_status(document: Document) -> str:
-    """Pick the right post-parse status for the document."""
-    # A successful EXTRACT or METADATA_ONLY both land on ``parsed``.
-    # The transition to ``indexed`` happens later (M3-C, after
-    # embeddings are written).
-    return "parsed"
