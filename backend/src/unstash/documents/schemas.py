@@ -50,7 +50,13 @@ class JobProgressRead(BaseModel):
 
 
 class DocumentUploadResponse(BaseModel):
-    """Response body for ``POST /api/orgs/{slug}/documents``."""
+    """Response body for ``POST /api/orgs/{slug}/documents``.
+
+    On a duplicate upload (same content hash already ingested in this
+    org) ``document_id`` refers to the existing document, ``job_id`` is
+    null (nothing was queued), and ``duplicate`` is true.
+    """
 
     document_id: uuid.UUID
-    job_id: uuid.UUID
+    job_id: uuid.UUID | None
+    duplicate: bool = False

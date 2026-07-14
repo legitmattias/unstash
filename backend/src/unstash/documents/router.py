@@ -2,10 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
+import shutil
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, File, HTTPException, Path, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    File,
+    HTTPException,
+    Path,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy import select
 
 from unstash.config import get_settings
@@ -34,6 +45,7 @@ async def upload_document(
     ctx: OrgContextDep,
     user: CurrentUserDep,
     file: Annotated[UploadFile, File(...)],
+    response: Response,
 ) -> DocumentUploadResponse:
     """Accept a file upload, store it on disk, queue ingestion.
 
@@ -43,6 +55,11 @@ async def upload_document(
     with ``status='queued'``. The ``ingest_document`` task is then
     queued; the task body detects the MIME type, routes it through the
     parse strategy, and moves the document to ``parsed`` or ``failed``.
+
+    Duplicate uploads (same SHA-256 already in this org, unless that
+    document ``failed``) are not re-ingested: the stored file is removed
+    and the existing document id is returned with ``duplicate=true`` and
+    HTTP 200.
 
     Returns the new document id and job id immediately. The caller
     polls ``GET /api/orgs/{slug}/jobs/{id}`` to follow progress.
@@ -62,6 +79,28 @@ async def upload_document(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=str(exc),
         ) from exc
+
+    # Dedup by content hash within the org (RLS scopes the query).
+    # A previously failed document does not block a retry upload.
+    existing = (
+        await ctx.session.execute(
+            select(Document)
+            .where(
+                Document.content_hash == stored.sha256_hex,
+                Document.status != "failed",
+            )
+            .limit(1),
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        await asyncio.to_thread(shutil.rmtree, stored.path.parent, True)
+        _ = user
+        response.status_code = status.HTTP_200_OK
+        return DocumentUploadResponse(
+            document_id=existing.id,
+            job_id=None,
+            duplicate=True,
+        )
 
     title = file.filename or stored.path.name
     mime_type = file.content_type or "application/octet-stream"

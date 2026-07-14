@@ -291,3 +291,104 @@ async def test_cross_org_isolation_on_documents_routes(
     # and User B is a member of Beta.)
     cross_get = await app_client.get(f"/api/orgs/beta/documents/{acme_document_id}")
     assert cross_get.status_code == 404
+
+
+async def test_duplicate_upload_returns_existing_document(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """The same bytes uploaded twice in one org dedupe to the first document."""
+    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
+    await _seed_membership(migrations_pool, user_a, acme_id)
+    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+
+    payload = b"identical bytes uploaded twice\n"
+    files = {"file": ("original.txt", payload, "text/plain")}
+    first = await app_client.post("/api/orgs/acme/documents", files=files)
+    assert first.status_code == 201
+    first_id = first.json()["document_id"]
+
+    files = {"file": ("copy-of-original.txt", payload, "text/plain")}
+    second = await app_client.post("/api/orgs/acme/documents", files=files)
+    assert second.status_code == 200
+    body = second.json()
+    assert body["duplicate"] is True
+    assert body["document_id"] == first_id
+    assert body["job_id"] is None
+
+    # Only the original row exists for that content hash.
+    async with migrations_pool.acquire() as conn:
+        count = await conn.fetchval(
+            "SELECT count(*) FROM documents WHERE org_id = $1",
+            acme_id,
+        )
+    assert count == 1
+
+
+async def test_same_content_in_different_orgs_is_not_deduped(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """Dedup is per-org: identical bytes in two orgs ingest independently."""
+    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    user_b = await _seed_user(migrations_pool, USER_B_EMAIL, USER_PASSWORD)
+    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
+    beta_id = await _seed_org(migrations_pool, "beta", "Beta")
+    await _seed_membership(migrations_pool, user_a, acme_id)
+    await _seed_membership(migrations_pool, user_b, beta_id)
+
+    payload = b"shared bytes across orgs\n"
+
+    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    first = await app_client.post(
+        "/api/orgs/acme/documents",
+        files={"file": ("doc.txt", payload, "text/plain")},
+    )
+    assert first.status_code == 201
+
+    await app_client.post("/api/auth/logout")
+    app_client.cookies.clear()
+    await _login(app_client, USER_B_EMAIL, USER_PASSWORD)
+    second = await app_client.post(
+        "/api/orgs/beta/documents",
+        files={"file": ("doc.txt", payload, "text/plain")},
+    )
+    assert second.status_code == 201
+    assert second.json()["duplicate"] is False
+
+
+async def test_failed_document_does_not_block_reupload(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """Re-uploading bytes whose previous ingestion failed starts a new attempt."""
+    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
+    await _seed_membership(migrations_pool, user_a, acme_id)
+    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+
+    # ELF magic bytes route to SKIP and the document lands in failed.
+    payload = b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 64
+    first = await app_client.post(
+        "/api/orgs/acme/documents",
+        files={"file": ("blob.bin", payload, "application/octet-stream")},
+    )
+    assert first.status_code == 201
+    first_id = first.json()["document_id"]
+
+    for _ in range(600):
+        doc = await app_client.get(f"/api/orgs/acme/documents/{first_id}")
+        if doc.json()["status"] == "failed":
+            break
+        await asyncio.sleep(0.1)
+    else:
+        pytest.fail("first upload never reached failed")
+
+    second = await app_client.post(
+        "/api/orgs/acme/documents",
+        files={"file": ("blob.bin", payload, "application/octet-stream")},
+    )
+    assert second.status_code == 201
+    assert second.json()["duplicate"] is False
+    assert second.json()["document_id"] != first_id
