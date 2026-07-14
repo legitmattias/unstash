@@ -36,7 +36,7 @@ The decision affects only the frontend. The backend (FastAPI), database (Postgre
 
 ### Hosting and deployment
 
-- **Self-hosted on the existing Hetzner + Docker + Caddy infrastructure** (the `mattic-one` VPS). Next.js runs in a container with `output: 'standalone'` mode.
+- **Self-hosted on the existing Hetzner + Docker + Caddy infrastructure** (the production VPS). Next.js runs in a container with `output: 'standalone'` mode.
 - **Not Vercel.** This is a hard constraint, not a preference: Vercel hosting would compromise the EU-hosting / GDPR posture established in ADR 0001 and the self-hosted operational model established in ADRs 0002 and 0003. Even Vercel's EU regions are insufficient because the customer data path would still traverse Vercel's infrastructure and control plane.
 
 ### Interaction with auth (ADR 0006)

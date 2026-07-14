@@ -195,7 +195,7 @@ async def test_pdf_upload_produces_chunks(
         [
             "Unstash test document — first paragraph.",
             "Second line of content here.",
-            "Third line that mentions BRF Ragstacken's roof.",
+            "Third line that mentions the housing cooperative's roof.",
         ],
     )
 

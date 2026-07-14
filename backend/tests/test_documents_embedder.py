@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import secrets
 from collections.abc import Callable
 
 import httpx
@@ -25,6 +26,9 @@ from unstash.documents.embedder import (
 )
 
 Handler = Callable[[httpx.Request], httpx.Response]
+
+# Generated per run; no literal for secret scanners to match.
+_TEST_API_KEY = secrets.token_urlsafe(16)
 
 
 def _no_backoff(_attempt: int) -> float:
@@ -75,7 +79,7 @@ async def test_fake_embedder_empty_input() -> None:
 
 def _jina() -> JinaEmbedder:
     return JinaEmbedder(
-        api_key="test-key",
+        api_key=_TEST_API_KEY,
         base_url="https://api.jina.ai/v1",
         model="jina-embeddings-v4",
         dimensions=3,
@@ -112,7 +116,7 @@ async def test_jina_sends_expected_request_and_parses_response(
     assert batch.vectors == [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
     assert batch.total_tokens == 7
     assert captured["url"] == "https://api.jina.ai/v1/embeddings"
-    assert captured["auth"] == "Bearer test-key"
+    assert captured["auth"] == f"Bearer {_TEST_API_KEY}"
     body = captured["body"]
     assert isinstance(body, dict)
     assert body["model"] == "jina-embeddings-v4"
