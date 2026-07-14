@@ -1,10 +1,9 @@
 """End-to-end upload + lifecycle tests for the documents routes.
 
-Exercises the full Phase A loop: POST upload streams a file to disk,
-inserts pending document and queued job rows, queues the stub task;
-the in-memory Taskiq broker runs the task body; document and job
-status transition to ``parsed`` and ``succeeded``; the monitoring
-routes surface the final state.
+Exercises the full loop: POST upload streams a file to disk, inserts
+pending document and queued job rows, queues ingestion; the in-memory
+Taskiq broker runs parse then embed; the document reaches ``indexed``
+and the job ``succeeded``; the monitoring routes surface the state.
 
 Cross-org isolation is exercised explicitly: a second org's
 authenticated user cannot see the first org's documents through any
@@ -102,6 +101,7 @@ async def app_client(
     monkeypatch.setenv("encryption_key", uuid.uuid4().hex)
     monkeypatch.setenv("UNSTASH_ENVIRONMENT", "test")
     monkeypatch.setenv("UNSTASH_DOCUMENTS_ROOT", str(docs_root))
+    monkeypatch.setenv("UNSTASH_EMBEDDER_BACKEND", "fake")
     get_settings.cache_clear()
     get_engine.cache_clear()
     get_admin_engine.cache_clear()
@@ -140,7 +140,7 @@ async def test_upload_round_trip(
     app_client: AsyncClient,
     migrations_pool: asyncpg.Pool,
 ) -> None:
-    """Small file uploads, queues a job, transitions through the stub, lands in monitoring."""
+    """Small file uploads, runs parse + embed, and lands indexed in monitoring."""
     user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
     acme_id = await _seed_org(migrations_pool, "acme", "Acme")
     await _seed_membership(migrations_pool, user_a, acme_id)
@@ -159,11 +159,11 @@ async def test_upload_round_trip(
     for _ in range(1800):
         doc = await app_client.get(f"/api/orgs/acme/documents/{document_id}")
         assert doc.status_code == 200
-        if doc.json()["status"] == "parsed":
+        if doc.json()["status"] == "indexed":
             break
         await asyncio.sleep(0.1)
     else:
-        pytest.fail(f"document never reached parsed, last body: {doc.json()}")
+        pytest.fail(f"document never reached indexed, last body: {doc.json()}")
 
     job = await app_client.get(f"/api/orgs/acme/jobs/{job_id}")
     assert job.status_code == 200

@@ -123,6 +123,7 @@ async def app_client(
     monkeypatch.setenv("encryption_key", uuid.uuid4().hex)
     monkeypatch.setenv("UNSTASH_ENVIRONMENT", "test")
     monkeypatch.setenv("UNSTASH_DOCUMENTS_ROOT", str(docs_root))
+    monkeypatch.setenv("UNSTASH_EMBEDDER_BACKEND", "fake")
     # Redirect HuggingFace tokenizer cache so the operator's personal
     # cache is never polluted by tests. The cache is shared across
     # tests in the session because the lru_cache on _get_chunker
@@ -163,16 +164,17 @@ async def _poll_until_terminal(
     *,
     deadline_seconds: float = 180.0,
 ) -> dict:
-    """Poll the document until status is terminal (parsed/failed/indexed).
+    """Poll the document until status is terminal (indexed/failed).
 
-    Generous ceiling: the first parse in a run may cold-load models.
+    ``parsed`` is intermediate now — embedding follows it. Generous
+    ceiling: the first parse in a run may cold-load models.
     """
     async with asyncio.timeout(deadline_seconds):
         while True:
             response = await client.get(f"/api/orgs/{slug}/documents/{document_id}")
             assert response.status_code == 200
             body = response.json()
-            if body["status"] in {"parsed", "failed", "indexed"}:
+            if body["status"] in {"failed", "indexed"}:
                 return body
             await asyncio.sleep(0.1)
 
@@ -209,7 +211,7 @@ async def test_pdf_upload_produces_chunks(
     job_id = body["job_id"]
 
     document = await _poll_until_terminal(app_client, "acme", document_id)
-    assert document["status"] == "parsed", document
+    assert document["status"] == "indexed", document
     assert document["mime_type"] == "application/pdf"
     assert document["pipeline_version"] is not None
     assert document["pipeline_config"] is not None
@@ -218,13 +220,13 @@ async def test_pdf_upload_produces_chunks(
     # (bypassing RLS so the test can read directly without setting GUC).
     async with migrations_pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT chunk_index, text, token_count, embedding IS NULL AS no_embedding "
+            "SELECT chunk_index, text, token_count, embedding IS NOT NULL AS embedded "
             "FROM chunks WHERE document_id = $1 ORDER BY chunk_index",
             uuid.UUID(document_id),
         )
 
     assert len(rows) >= 1
-    assert all(row["no_embedding"] for row in rows), "chunks should not have embeddings yet"
+    assert all(row["embedded"] for row in rows), "chunks should be embedded"
     assert all(row["token_count"] > 0 for row in rows)
     combined = " ".join(row["text"] for row in rows)
     # The exact chunking is up to Docling; check that meaningful content is in there.
@@ -337,7 +339,7 @@ async def test_mime_detection_overrides_declared_type(
     document_id = response.json()["document_id"]
 
     document = await _poll_until_terminal(app_client, "acme", document_id)
-    assert document["status"] == "parsed", document
+    assert document["status"] == "indexed", document
     # The detected MIME has overwritten the declared one.
     assert document["mime_type"] == "application/pdf"
 
@@ -398,18 +400,18 @@ async def test_legacy_office_converts_then_parses(
     document_id = response.json()["document_id"]
 
     document = await _poll_until_terminal(app_client, "acme", document_id)
-    assert document["status"] == "parsed", document
+    assert document["status"] == "indexed", document
     assert document["pipeline_config"]["converted_via"] == "gotenberg"
     assert document["pipeline_config"]["source_mime"] == "application/msword"
 
     async with migrations_pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT text, embedding IS NULL AS no_embedding "
+            "SELECT text, embedding IS NOT NULL AS embedded "
             "FROM chunks WHERE document_id = $1 ORDER BY chunk_index",
             uuid.UUID(document_id),
         )
     assert len(rows) >= 1
-    assert all(row["no_embedding"] for row in rows)
+    assert all(row["embedded"] for row in rows)
     combined = " ".join(row["text"] for row in rows).lower()
     assert "protocol" in combined or "roof" in combined
 
