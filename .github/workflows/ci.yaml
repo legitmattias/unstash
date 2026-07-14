@@ -325,6 +325,8 @@ jobs:
           # HF_TOKEN lifts the HuggingFace Hub anonymous rate limit so
           # parallel test runs downloading the tokenizer don't hit 429.
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          # Opt-in: the live Jina test runs only when this secret is set.
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
         run: uv run pytest tests/integration --no-cov
 
   # ---------------------------------------------------------------------------
