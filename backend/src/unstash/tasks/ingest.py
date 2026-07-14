@@ -46,8 +46,7 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger(__name__)
 
-# Chunks per Jina request. Larger = fewer calls; start conservative and
-# tune against observed latency/cost.
+# Chunks per Jina request; tune against observed latency/cost.
 _EMBED_BATCH_SIZE = 32
 
 

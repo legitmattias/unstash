@@ -1,13 +1,8 @@
-"""Embedding client for chunk indexing (M3-C).
+"""Embedding client for chunk indexing.
 
-Turns chunk text into dense vectors. A small interface with a real Jina
-client and a deterministic fake keeps the worker testable offline and
-isolates the provider behind one seam; query embedding for search reuses
-the same interface at M4.
-
-The backend is config-selected (``embedder_backend``) so the CI smoke and
-unit tests can run the full upload-to-indexed flow with the fake, the same
-way the Taskiq broker swaps to its in-memory implementation.
+An ``Embedder`` interface with a real Jina client and a deterministic
+fake, selected by ``embedder_backend`` so tests run the full flow
+offline. Query embedding for search reuses the same interface.
 """
 
 from __future__ import annotations
