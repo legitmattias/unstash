@@ -56,6 +56,31 @@ logger = structlog.get_logger(__name__)
 # Chunks per Jina request; tune against observed latency/cost.
 _EMBED_BATCH_SIZE = 32
 
+# The producer queues a task inside its own transaction, so the task can
+# start before the rows it targets are committed. Retries bridge that
+# window; a producer rollback means the rows never appear and we give up.
+_TARGET_RETRY_DELAYS = (0.05, 0.1, 0.2, 0.4, 0.8, 1.6)
+
+
+async def _load_targets(
+    session: AsyncSession,
+    document_id: uuid.UUID,
+    job_id: uuid.UUID,
+) -> tuple[Document | None, JobProgress | None]:
+    """Load the task's document + job rows, tolerating producer-commit lag."""
+    document = None
+    job = None
+    for delay in _TARGET_RETRY_DELAYS:
+        document = await session.get(Document, document_id)
+        job = await session.get(JobProgress, job_id)
+        if document is not None and job is not None:
+            break
+        await asyncio.sleep(delay)
+    else:
+        document = await session.get(Document, document_id)
+        job = await session.get(JobProgress, job_id)
+    return document, job
+
 
 @broker.task
 async def ingest_document(
@@ -75,8 +100,7 @@ async def ingest_document(
 
     parsed_ok = False
     async with org_context(org_id) as session:
-        document = await session.get(Document, document_id)
-        job = await session.get(JobProgress, job_id)
+        document, job = await _load_targets(session, document_id, job_id)
         if document is None or job is None:
             logger.warning(
                 "ingest_document_target_missing",
@@ -164,8 +188,7 @@ async def embed_document(
     job_id = uuid.UUID(job_id_str)
 
     async with org_context(org_id) as session:
-        document = await session.get(Document, document_id)
-        job = await session.get(JobProgress, job_id)
+        document, job = await _load_targets(session, document_id, job_id)
         if document is None or job is None:
             logger.warning(
                 "embed_document_target_missing",
