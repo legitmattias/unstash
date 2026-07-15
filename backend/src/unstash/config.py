@@ -139,6 +139,24 @@ class Settings(BaseSettings):
     jina_embedding_dimensions: int = Field(default=2048, gt=0)
     jina_timeout_seconds: float = Field(default=60.0, gt=0)
 
+    # -- OCR (scanned PDFs) -----------------------------------------------------
+    # 'mistral' sends low-text-density PDFs to the Mistral OCR API;
+    # 'off' fails them with an actionable error instead (a scan without
+    # OCR has no searchable content). Enabled per environment.
+
+    ocr_backend: str = Field(
+        default="off",
+        description="OCR backend for scanned PDFs: 'mistral' or 'off'.",
+    )
+    ocr_min_chars_per_page: int = Field(
+        default=200,
+        ge=0,
+        description="Below this average, a PDF is treated as scanned.",
+    )
+    mistral_base_url: str = Field(default="https://api.mistral.ai")
+    mistral_ocr_model: str = Field(default="mistral-ocr-latest")
+    mistral_timeout_seconds: float = Field(default=120.0, gt=0)
+
     # -- External APIs ---------------------------------------------------------
     # Added when their respective features are implemented.
 

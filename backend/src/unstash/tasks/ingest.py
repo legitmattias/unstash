@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -293,6 +293,7 @@ async def _run_parse(
 
     if strategy is ParseStrategy.EXTRACT:
         parsed = await _docling_parse(document, file_path)
+        parsed = await _ocr_if_scanned(document, file_path, parsed, mime)
         _persist_chunks(session, document, parsed)
         document.pipeline_version = parsed.pipeline_version
         document.pipeline_config = parsed.pipeline_config
@@ -348,6 +349,74 @@ async def _run_parse(
     # in a supported format or escalate.
     msg = f"Unsupported MIME type: {mime}"
     raise ValueError(msg)
+
+
+async def _ocr_if_scanned(
+    document: Document,
+    file_path: Path,
+    parsed: ParsedDocument,
+    mime: str,
+) -> ParsedDocument:
+    """Route a low-text-density PDF through OCR, or fail actionably.
+
+    A scanned PDF parses to (near-)zero text; without OCR it would index
+    as silently empty, so with the backend off it fails loudly instead.
+    The OCR markdown is kept beside the original and parsed through the
+    normal path.
+    """
+    from unstash.config import get_settings  # noqa: PLC0415
+    from unstash.documents.ocr import needs_ocr, ocr_pdf_to_markdown  # noqa: PLC0415
+
+    if mime != "application/pdf":
+        return parsed
+    settings = get_settings()
+    if not needs_ocr(
+        page_count=parsed.page_count,
+        total_chars=parsed.total_chars,
+        min_chars_per_page=settings.ocr_min_chars_per_page,
+    ):
+        return parsed
+    if settings.ocr_backend != "mistral":
+        msg = (
+            f"Scanned PDF: {parsed.total_chars} extracted chars over "
+            f"{parsed.page_count} pages and OCR is disabled"
+        )
+        raise ValueError(msg)
+
+    logger.info(
+        "ingest_ocr_starting",
+        document_id=str(document.id),
+        pages=parsed.page_count,
+        extracted_chars=parsed.total_chars,
+    )
+    markdown = await ocr_pdf_to_markdown(
+        file_path,
+        api_key=settings.mistral_api_key,
+        base_url=settings.mistral_base_url,
+        model=settings.mistral_ocr_model,
+        timeout=settings.mistral_timeout_seconds,
+    )
+    # Keep the OCR text beside the original so re-parsing doesn't re-OCR.
+    ocr_path = file_path.parent / "ocr.md"
+    await asyncio.to_thread(ocr_path.write_text, markdown, "utf-8")
+
+    ocr_parsed = await _docling_parse(document, ocr_path)
+    logger.info(
+        "ingest_ocr_finished",
+        document_id=str(document.id),
+        chunks=len(ocr_parsed.chunks),
+        markdown_chars=len(markdown),
+    )
+    return replace(
+        ocr_parsed,
+        pipeline_version=f"{ocr_parsed.pipeline_version} (ocr via mistral)",
+        pipeline_config={
+            **ocr_parsed.pipeline_config,
+            "ocr_via": "mistral",
+            "ocr_model": settings.mistral_ocr_model,
+            "source_pages": parsed.page_count,
+        },
+    )
 
 
 async def _docling_parse(document: Document, path: Path) -> ParsedDocument:

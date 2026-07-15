@@ -66,11 +66,21 @@ def _empty_config() -> dict[str, Any]:
 
 @dataclass(frozen=True, slots=True)
 class ParsedDocument:
-    """Result of parsing one document."""
+    """Result of parsing one document.
+
+    ``page_count`` is 0 for formats without page semantics (text,
+    markdown); the OCR trigger only evaluates it for PDFs.
+    """
 
     chunks: list[ParsedChunk]
     pipeline_version: str
     pipeline_config: dict[str, Any] = field(default_factory=_empty_config)
+    page_count: int = 0
+
+    @property
+    def total_chars(self) -> int:
+        """Total extracted characters across all chunks."""
+        return sum(len(chunk.text) for chunk in self.chunks)
 
 
 @lru_cache(maxsize=1)
@@ -150,4 +160,5 @@ def parse_to_chunks(file_path: Path) -> ParsedDocument:
         chunks=chunks,
         pipeline_version=PIPELINE_VERSION,
         pipeline_config=config,
+        page_count=doc.num_pages(),
     )
