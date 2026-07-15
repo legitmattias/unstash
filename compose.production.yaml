@@ -53,6 +53,7 @@ services:
       - session_secret
       - encryption_key
       - mistral_api_key
+      - jina_api_key
     environment:
       UNSTASH_ENVIRONMENT: production
       UNSTASH_OCR_BACKEND: mistral
@@ -126,3 +127,5 @@ secrets:
     file: ${SECRETS_DIR}/encryption_key
   mistral_api_key:
     file: ${SECRETS_DIR}/mistral_api_key
+  jina_api_key:
+    file: ${SECRETS_DIR}/jina_api_key
