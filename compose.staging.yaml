@@ -53,8 +53,10 @@ services:
       - database_admin_password
       - session_secret
       - encryption_key
+      - mistral_api_key
     environment:
       UNSTASH_ENVIRONMENT: staging
+      UNSTASH_OCR_BACKEND: mistral
       UNSTASH_DEBUG: "false"
       UNSTASH_LOG_LEVEL: DEBUG
     volumes:
@@ -123,3 +125,5 @@ secrets:
     file: ${SECRETS_DIR}/session_secret
   encryption_key:
     file: ${SECRETS_DIR}/encryption_key
+  mistral_api_key:
+    file: ${SECRETS_DIR}/mistral_api_key
