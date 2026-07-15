@@ -124,6 +124,9 @@ async def app_client(
     monkeypatch.setenv("UNSTASH_ENVIRONMENT", "test")
     monkeypatch.setenv("UNSTASH_DOCUMENTS_ROOT", str(docs_root))
     monkeypatch.setenv("UNSTASH_EMBEDDER_BACKEND", "fake")
+    # Tiny synthetic fixtures fall below any realistic chars-per-page
+    # threshold; the OCR tests opt back in explicitly.
+    monkeypatch.setenv("UNSTASH_OCR_MIN_CHARS_PER_PAGE", "0")
     # Redirect HuggingFace tokenizer cache so the operator's personal
     # cache is never polluted by tests. The cache is shared across
     # tests in the session because the lru_cache on _get_chunker
@@ -483,3 +486,115 @@ async def test_conversion_failure_lands_in_failed_state(
     document = await _poll_until_terminal(app_client, "acme", document_id)
     assert document["status"] == "failed", document
     assert "ConversionError" in document["parsing_error"]
+
+
+def _make_scanned_pdf(path: Path, lines: list[str]) -> None:
+    """Write an image-only PDF (no text layer) — what a scan looks like."""
+    from PIL import Image, ImageDraw, ImageFont  # noqa: PLC0415
+
+    img = Image.new("RGB", (1654, 2339), "white")
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 42)
+    except OSError:
+        font = ImageFont.load_default(size=42)
+    y = 200
+    for line in lines:
+        draw.text((150, y), line, fill="black", font=font)
+        y += 80
+    png = path.with_suffix(".png")
+    img.save(png)
+
+    c = canvas.Canvas(str(path), pagesize=A4)
+    c.drawImage(str(png), 0, 0, width=A4[0], height=A4[1])
+    c.save()
+
+
+async def test_scanned_pdf_goes_through_ocr(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A no-text-layer PDF triggers OCR; chunks come from the OCR markdown.
+
+    The OCR API call is stubbed; everything else — trigger, markdown
+    persistence, re-parse, chunking, provenance — runs for real.
+    """
+    monkeypatch.setenv("UNSTASH_OCR_BACKEND", "mistral")
+    monkeypatch.setenv("UNSTASH_OCR_MIN_CHARS_PER_PAGE", "200")
+    get_settings.cache_clear()
+
+    async def _fake_ocr(
+        _path: Path,
+        *,
+        api_key: str,
+        base_url: str,
+        model: str,
+        timeout: float,  # noqa: ASYNC109 — mirrors the real ocr_pdf_to_markdown signature
+    ) -> str:
+        _ = api_key, base_url, model, timeout
+        return "# Protokoll\n\nStyrelsen beslutade att renovera taket på fastigheten."
+
+    monkeypatch.setattr("unstash.documents.ocr.ocr_pdf_to_markdown", _fake_ocr)
+
+    user_a = await _seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
+    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
+    await _seed_membership(migrations_pool, user_a, acme_id)
+
+    scan = tmp_path / "scan.pdf"
+    _make_scanned_pdf(scan, ["PROTOKOLL", "Taket ska renoveras."])
+
+    await _login(app_client, USER_EMAIL, USER_PASSWORD)
+    with scan.open("rb") as fh:
+        response = await app_client.post(
+            "/api/orgs/acme/documents",
+            files={"file": ("scan.pdf", fh, "application/pdf")},
+        )
+    assert response.status_code == 201, response.text
+    document_id = response.json()["document_id"]
+
+    document = await _poll_until_terminal(app_client, "acme", document_id)
+    assert document["status"] == "indexed", document
+    assert document["pipeline_config"]["ocr_via"] == "mistral"
+    assert document["pipeline_config"]["source_pages"] == 1
+    assert "(ocr via mistral)" in document["pipeline_version"]
+
+    async with migrations_pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT text FROM chunks WHERE document_id = $1 ORDER BY chunk_index",
+            uuid.UUID(document_id),
+        )
+    combined = " ".join(row["text"] for row in rows).lower()
+    assert "taket" in combined
+
+
+async def test_scanned_pdf_with_ocr_off_fails_actionably(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the OCR backend off (default), a scan fails loudly, not silently empty."""
+    monkeypatch.setenv("UNSTASH_OCR_MIN_CHARS_PER_PAGE", "200")
+    get_settings.cache_clear()
+
+    user_a = await _seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
+    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
+    await _seed_membership(migrations_pool, user_a, acme_id)
+
+    scan = tmp_path / "scan.pdf"
+    _make_scanned_pdf(scan, ["PROTOKOLL", "Bara en bild, ingen text."])
+
+    await _login(app_client, USER_EMAIL, USER_PASSWORD)
+    with scan.open("rb") as fh:
+        response = await app_client.post(
+            "/api/orgs/acme/documents",
+            files={"file": ("scan.pdf", fh, "application/pdf")},
+        )
+    assert response.status_code == 201
+    document_id = response.json()["document_id"]
+
+    document = await _poll_until_terminal(app_client, "acme", document_id)
+    assert document["status"] == "failed", document
+    assert "OCR is disabled" in document["parsing_error"]
