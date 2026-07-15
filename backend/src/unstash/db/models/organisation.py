@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import CheckConstraint, String, Uuid, text
+from sqlalchemy import CheckConstraint, Integer, String, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from unstash.db.models.base import Base, TimestampMixin
@@ -48,6 +48,9 @@ class Organisation(Base, TimestampMixin):
         nullable=False,
         server_default="sv-SE",
     )
+    # Uploads accepted per UTC day. NULL = unlimited (the pilot default);
+    # operator-set per org until a billing tier owns it.
+    daily_upload_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     memberships: Mapped[list[OrgMembership]] = relationship(
         back_populates="organisation",
