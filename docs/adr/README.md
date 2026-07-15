@@ -31,6 +31,7 @@ Each ADR follows Michael Nygard's structure:
 | [0006](./0006-auth-and-cross-tenant-admin.md) | Authentication, Session Storage, and Cross-Tenant Admin | Accepted |
 | [0007](./0007-frontend-nextjs.md) | Frontend — Next.js (App Router) over SvelteKit | Accepted |
 | [0008](./0008-gotenberg-sidecar-legacy-conversion.md) | Gotenberg Sidecar for Legacy Office → PDF Conversion | Accepted |
+| [0009](./0009-config-switched-inference-backends.md) | Config-Switched Inference Backends (Hosted API First, Local Alternative) | Accepted |
 
 ## Creating a new ADR
 
