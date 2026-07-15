@@ -38,6 +38,10 @@ dependencies = [
     "python-magic>=0.4.27",
     "docling>=2.81.0",
     "transformers>=4.45.0",
+    # Direct deps so tool.uv.sources can pin them to the CPU-only index
+    # (sources apply only to declared dependencies).
+    "torch>=2.13.0",
+    "torchvision>=0.28.0",
 ]
 
 [dependency-groups]
@@ -61,6 +65,17 @@ packages = ["src/unstash"]
 
 [tool.uv]
 package = true
+
+# CPU-only PyTorch wheels: the deployment hosts have no GPU, and the
+# default wheels drag in the multi-GB NVIDIA/CUDA stack.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+torchvision = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 # -----------------------------------------------------------------------------
 # Ruff — linting and formatting
