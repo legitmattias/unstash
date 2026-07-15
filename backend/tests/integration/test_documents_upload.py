@@ -203,6 +203,23 @@ async def test_upload_writes_file_with_correct_hash(
     assert on_disk.read_bytes() == payload
 
 
+async def _wait_terminal(client: AsyncClient, slug: str, document_id: str) -> str:
+    """Poll until ingestion is terminal so no task outlives the test.
+
+    A task still running at fixture teardown leaks its DB connection and
+    trips ``filterwarnings = error`` in an unrelated test.
+    """
+    body: dict = {}
+    for _ in range(1800):
+        doc = await client.get(f"/api/orgs/{slug}/documents/{document_id}")
+        assert doc.status_code == 200
+        body = doc.json()
+        if body["status"] in {"indexed", "failed"}:
+            return body["status"]
+        await asyncio.sleep(0.1)
+    pytest.fail(f"document never terminal, last body: {body}")
+
+
 async def test_list_documents_paginates(
     app_client: AsyncClient,
     migrations_pool: asyncpg.Pool,
@@ -325,6 +342,8 @@ async def test_duplicate_upload_returns_existing_document(
         )
     assert count == 1
 
+    await _wait_terminal(app_client, "acme", first_id)
+
 
 async def test_same_content_in_different_orgs_is_not_deduped(
     app_client: AsyncClient,
@@ -356,6 +375,12 @@ async def test_same_content_in_different_orgs_is_not_deduped(
     )
     assert second.status_code == 201
     assert second.json()["duplicate"] is False
+
+    await _wait_terminal(app_client, "beta", second.json()["document_id"])
+    await app_client.post("/api/auth/logout")
+    app_client.cookies.clear()
+    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await _wait_terminal(app_client, "acme", first.json()["document_id"])
 
 
 async def test_failed_document_does_not_block_reupload(
@@ -392,3 +417,54 @@ async def test_failed_document_does_not_block_reupload(
     assert second.status_code == 201
     assert second.json()["duplicate"] is False
     assert second.json()["document_id"] != first_id
+
+    assert await _wait_terminal(app_client, "acme", second.json()["document_id"]) == "failed"
+
+
+async def test_daily_upload_limit_enforced(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """Uploads beyond the org's daily limit are rejected with 429.
+
+    Duplicates do not consume quota (no row is created), and an org
+    with a NULL limit is unaffected (every other test exercises that).
+    """
+    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
+    await _seed_membership(migrations_pool, user_a, acme_id)
+    async with migrations_pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE organisations SET daily_upload_limit = 2 WHERE id = $1",
+            acme_id,
+        )
+    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+
+    first = await app_client.post(
+        "/api/orgs/acme/documents",
+        files={"file": ("one.txt", b"first payload", "text/plain")},
+    )
+    assert first.status_code == 201
+
+    # A duplicate of the first upload: 200, creates no row, no quota use.
+    dup = await app_client.post(
+        "/api/orgs/acme/documents",
+        files={"file": ("one-again.txt", b"first payload", "text/plain")},
+    )
+    assert dup.status_code == 200
+
+    second = await app_client.post(
+        "/api/orgs/acme/documents",
+        files={"file": ("two.txt", b"second payload", "text/plain")},
+    )
+    assert second.status_code == 201
+
+    third = await app_client.post(
+        "/api/orgs/acme/documents",
+        files={"file": ("three.txt", b"third payload", "text/plain")},
+    )
+    assert third.status_code == 429
+    assert "limit" in third.json()["detail"].lower()
+
+    await _wait_terminal(app_client, "acme", first.json()["document_id"])
+    await _wait_terminal(app_client, "acme", second.json()["document_id"])

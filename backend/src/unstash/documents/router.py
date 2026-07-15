@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 import uuid
+from datetime import UTC, datetime, time
 from typing import Annotated
 
 from fastapi import (
@@ -17,10 +18,10 @@ from fastapi import (
     UploadFile,
     status,
 )
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from unstash.config import get_settings
-from unstash.db.models import Document, JobProgress
+from unstash.db.models import Document, JobProgress, Organisation
 from unstash.documents.schemas import (
     DocumentRead,
     DocumentUploadResponse,
@@ -30,10 +31,34 @@ from unstash.documents.storage import (
     UploadTooLargeError,
     write_uploaded_file,
 )
-from unstash.orgs.dependencies import CurrentUserDep, OrgContextDep
+from unstash.orgs.dependencies import CurrentUserDep, OrgContext, OrgContextDep
 from unstash.tasks import ingest_document
 
 documents_router = APIRouter()
+
+
+async def _enforce_daily_upload_limit(ctx: OrgContext) -> None:
+    """Reject the upload with 429 once the org's daily limit is reached.
+
+    The limit counts document rows created since UTC midnight, so failed
+    ingestions count (the limit is abuse protection, not a success quota)
+    while deduplicated uploads do not (they create no row). Runs before
+    the file write so a rejected upload never touches disk.
+    """
+    org = await ctx.session.get(Organisation, ctx.org_id)
+    limit = org.daily_upload_limit if org is not None else None
+    if limit is None:
+        return
+
+    day_start = datetime.combine(datetime.now(UTC).date(), time.min, tzinfo=UTC)
+    uploads_today = await ctx.session.scalar(
+        select(func.count(Document.id)).where(Document.created_at >= day_start),
+    )
+    if (uploads_today or 0) >= limit:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Daily upload limit reached ({limit} per day).",
+        )
 
 
 @documents_router.post(
@@ -64,6 +89,8 @@ async def upload_document(
     Returns the new document id and job id immediately. The caller
     polls ``GET /api/orgs/{slug}/jobs/{id}`` to follow progress.
     """
+    await _enforce_daily_upload_limit(ctx)
+
     settings = get_settings()
     document_id = uuid.uuid4()
     try:
