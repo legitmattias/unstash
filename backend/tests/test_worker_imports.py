@@ -1,9 +1,7 @@
 """Guard the taskiq worker's import order.
 
-The worker entrypoint imports ``unstash.tasks`` first, an order no other
-test exercises — a circular import through another package can pass the
-whole suite and CI yet crash-loop the deployed worker. A fresh
-interpreter reproduces that exact order.
+The worker entrypoint imports ``unstash.tasks`` first — an order nothing
+else exercises. A fresh interpreter reproduces it.
 """
 
 from __future__ import annotations
