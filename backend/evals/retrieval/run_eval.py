@@ -121,12 +121,75 @@ async def rank_bm25(pool: asyncpg.Pool, query_text: str) -> list[str]:
     return [r["title"] for r in rows]
 
 
-def rank_rrf(vector_ranked: list[str], bm25_ranked: list[str]) -> list[str]:
+def rank_rrf(
+    vector_ranked: list[str],
+    bm25_ranked: list[str],
+    k: int = RRF_K,
+    vector_weight: float = 1.0,
+    bm25_weight: float = 1.0,
+) -> list[str]:
     scores: dict[str, float] = defaultdict(float)
-    for ranked in (vector_ranked, bm25_ranked):
+    for ranked, weight in ((vector_ranked, vector_weight), (bm25_ranked, bm25_weight)):
         for position, doc in enumerate(ranked, start=1):
-            scores[doc] += 1.0 / (RRF_K + position)
+            scores[doc] += weight / (k + position)
     return [doc for doc, _ in sorted(scores.items(), key=lambda kv: -kv[1])]
+
+
+async def sweep_fusion(embedder_kind: str, report_path: str | None) -> None:
+    """Grid-search RRF k and vector:bm25 weighting over one retrieval pass."""
+    from eval_db import fresh_database  # noqa: PLC0415
+
+    from unstash.documents.embedder import EmbeddingTask  # noqa: PLC0415
+
+    golden = [q for q in load_golden() if q["category"] != "no_answer"]
+    embedder = build_embedder(embedder_kind)
+    collected = []
+
+    async with fresh_database() as pool:
+        await ingest_corpus(pool, embedder)
+        for q in golden:
+            qvec_batch = await embedder.embed([q["query"]], task=EmbeddingTask.QUERY)
+            qvec = "[" + ",".join(str(v) for v in qvec_batch.vectors[0]) + "]"
+            collected.append((q, await rank_vector(pool, qvec), await rank_bm25(pool, q["query"])))
+
+    def row(name, ranker):
+        overall, mrr_all = [], []
+        cats = defaultdict(list)
+        for q, vec, bm in collected:
+            judgments = {rel["doc"]: rel["grade"] for rel in q["relevant"]}
+            ranked = ranker(vec, bm)
+            overall.append(ndcg_at_k(ranked, judgments, 10))
+            mrr_all.append(mrr(ranked, judgments))
+            cats[q["category"]].append(ndcg_at_k(ranked, judgments, 10))
+
+        def avg(v):
+            return f"{sum(v) / len(v):.3f}" if v else "-"
+
+        return (
+            f"| {name} | {avg(overall)} | {avg(mrr_all)} | {avg(cats['keyword'])} |"
+            f" {avg(cats['semantic'])} | {avg(cats['decision'])} | {avg(cats['english'])} |"
+        )
+
+    lines = [f"# Fusion sweep — embedder={embedder_kind}, {len(golden)} queries", ""]
+    lines.append("| config | all nDCG@10 | all MRR | keyword | semantic | decision | english |")
+    lines.append("|---|---|---|---|---|---|---|")
+    lines.append(row("vector only", lambda vec, bm: vec))
+    lines.append(row("bm25 only", lambda vec, bm: bm))
+    for k in (20, 60, 120):
+        for wv in (1.0, 2.0, 3.0, 4.0):
+            lines.append(
+                row(
+                    f"rrf k={k} w={wv:g}:1",
+                    lambda vec, bm, k=k, wv=wv: rank_rrf(vec, bm, k, wv, 1.0),
+                )
+            )
+    report = "\n".join(lines)
+    print("\n" + report)
+    if report_path:
+        out = HERE / report_path
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(report + "\n")
+        print(f"\nwritten to {out}")
 
 
 SWEDISH_BM25_INDEX = (
@@ -200,5 +263,9 @@ if __name__ == "__main__":
     parser.add_argument("--embedder", choices=["jina", "fake"], default="jina")
     parser.add_argument("--report", default=None)
     parser.add_argument("--bm25", choices=["icu", "swedish"], default="icu")
+    parser.add_argument("--sweep-fusion", action="store_true")
     args = parser.parse_args()
-    asyncio.run(run(args.embedder, args.report, args.bm25))
+    if args.sweep_fusion:
+        asyncio.run(sweep_fusion(args.embedder, args.report))
+    else:
+        asyncio.run(run(args.embedder, args.report, args.bm25))
