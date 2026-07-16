@@ -312,9 +312,10 @@ jobs:
       - name: Cache Docling + tokenizer models
         uses: actions/cache@v4
         with:
-          # Docling + chunker tokenizer models (~500 MB) live under the
-          # HuggingFace cache. Keyed on the lockfile; bumps re-populate.
-          path: ~/.cache/huggingface
+          # Docling + chunker tokenizer models (~500 MB). Tests pin
+          # HF_HOME to this path (tests/conftest.py); keyed on the
+          # lockfile so dependency bumps re-populate.
+          path: /tmp/unstash-test-hf-cache
           key: docling-models-${{ hashFiles('backend/uv.lock') }}
           restore-keys: |
             docling-models-
