@@ -23,7 +23,7 @@ Each secret is a single file containing only the secret value, with no trailing 
 | `session_secret.txt` | Secret key for session cookie signing | `openssl rand -base64 64` |
 | `encryption_key.txt` | Fernet key for encrypting OAuth connector tokens at rest | `python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'` |
 | `jina_api_key.txt` | Jina AI API key for embeddings | Get from https://jina.ai |
-| `mistral_api_key.txt` | Mistral AI API key for cluster labeling | Get from https://console.mistral.ai |
+| `mistral_api_key.txt` | Mistral AI API key for OCR of scanned documents (and later cluster labeling) | Get from https://console.mistral.ai |
 
 Additional secrets added as the project grows (Google OAuth, Stripe, etc.) should be documented here as they're introduced.
 

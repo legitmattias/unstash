@@ -2,14 +2,26 @@
 
 from __future__ import annotations
 
+import asyncio
+import shutil
 import uuid
+from datetime import UTC, datetime, time
 from typing import Annotated
 
-from fastapi import APIRouter, File, HTTPException, Path, Query, UploadFile, status
-from sqlalchemy import select
+from fastapi import (
+    APIRouter,
+    File,
+    HTTPException,
+    Path,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
+from sqlalchemy import func, select
 
 from unstash.config import get_settings
-from unstash.db.models import Document, JobProgress
+from unstash.db.models import Document, JobProgress, Organisation
 from unstash.documents.schemas import (
     DocumentRead,
     DocumentUploadResponse,
@@ -19,10 +31,34 @@ from unstash.documents.storage import (
     UploadTooLargeError,
     write_uploaded_file,
 )
-from unstash.orgs.dependencies import CurrentUserDep, OrgContextDep
+from unstash.orgs.dependencies import CurrentUserDep, OrgContext, OrgContextDep
 from unstash.tasks import ingest_document
 
 documents_router = APIRouter()
+
+
+async def _enforce_daily_upload_limit(ctx: OrgContext) -> None:
+    """Reject the upload with 429 once the org's daily limit is reached.
+
+    The limit counts document rows created since UTC midnight, so failed
+    ingestions count (the limit is abuse protection, not a success quota)
+    while deduplicated uploads do not (they create no row). Runs before
+    the file write so a rejected upload never touches disk.
+    """
+    org = await ctx.session.get(Organisation, ctx.org_id)
+    limit = org.daily_upload_limit if org is not None else None
+    if limit is None:
+        return
+
+    day_start = datetime.combine(datetime.now(UTC).date(), time.min, tzinfo=UTC)
+    uploads_today = await ctx.session.scalar(
+        select(func.count(Document.id)).where(Document.created_at >= day_start),
+    )
+    if (uploads_today or 0) >= limit:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Daily upload limit reached ({limit} per day).",
+        )
 
 
 @documents_router.post(
@@ -34,6 +70,7 @@ async def upload_document(
     ctx: OrgContextDep,
     user: CurrentUserDep,
     file: Annotated[UploadFile, File(...)],
+    response: Response,
 ) -> DocumentUploadResponse:
     """Accept a file upload, store it on disk, queue ingestion.
 
@@ -44,9 +81,16 @@ async def upload_document(
     queued; the task body detects the MIME type, routes it through the
     parse strategy, and moves the document to ``parsed`` or ``failed``.
 
+    Duplicate uploads (same SHA-256 already in this org, unless that
+    document ``failed``) are not re-ingested: the stored file is removed
+    and the existing document id is returned with ``duplicate=true`` and
+    HTTP 200.
+
     Returns the new document id and job id immediately. The caller
     polls ``GET /api/orgs/{slug}/jobs/{id}`` to follow progress.
     """
+    await _enforce_daily_upload_limit(ctx)
+
     settings = get_settings()
     document_id = uuid.uuid4()
     try:
@@ -62,6 +106,28 @@ async def upload_document(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=str(exc),
         ) from exc
+
+    # Dedup by content hash within the org (RLS scopes the query).
+    # A previously failed document does not block a retry upload.
+    existing = (
+        await ctx.session.execute(
+            select(Document)
+            .where(
+                Document.content_hash == stored.sha256_hex,
+                Document.status != "failed",
+            )
+            .limit(1),
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        await asyncio.to_thread(shutil.rmtree, stored.path.parent, True)
+        _ = user
+        response.status_code = status.HTTP_200_OK
+        return DocumentUploadResponse(
+            document_id=existing.id,
+            job_id=None,
+            duplicate=True,
+        )
 
     title = file.filename or stored.path.name
     mime_type = file.content_type or "application/octet-stream"

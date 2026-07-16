@@ -40,8 +40,13 @@ class _FakeChunker:
         return [_FakeChunk(text) for text in self._texts]
 
 
+class _FakeDoc:
+    def num_pages(self) -> int:
+        return 3
+
+
 class _FakeConvertResult:
-    document = object()
+    document = _FakeDoc()
 
 
 class _FakeConverter:

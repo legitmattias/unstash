@@ -56,6 +56,8 @@ services:
       - database_admin_password
       - session_secret
       - encryption_key
+      - mistral_api_key
+      - jina_api_key
     environment:
       UNSTASH_ENVIRONMENT: development
       UNSTASH_DEBUG: "true"
@@ -99,3 +101,7 @@ secrets:
     file: ./secrets/session_secret.txt
   encryption_key:
     file: ./secrets/encryption_key.txt
+  mistral_api_key:
+    file: ./secrets/mistral_api_key.txt
+  jina_api_key:
+    file: ./secrets/jina_api_key.txt

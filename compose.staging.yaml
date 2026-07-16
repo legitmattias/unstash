@@ -53,8 +53,11 @@ services:
       - database_admin_password
       - session_secret
       - encryption_key
+      - mistral_api_key
+      - jina_api_key
     environment:
       UNSTASH_ENVIRONMENT: staging
+      UNSTASH_OCR_BACKEND: mistral
       UNSTASH_DEBUG: "false"
       UNSTASH_LOG_LEVEL: DEBUG
     volumes:
@@ -97,6 +100,16 @@ services:
           memory: 64M
           cpus: "0.25"
 
+  gotenberg:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          # LibreOffice spins up per conversion; idle cost is low. The
+          # cap contains a runaway conversion on the shared host.
+          memory: 512M
+          cpus: "0.5"
+
 volumes:
   worker_model_cache:
 
@@ -113,3 +126,7 @@ secrets:
     file: ${SECRETS_DIR}/session_secret
   encryption_key:
     file: ${SECRETS_DIR}/encryption_key
+  mistral_api_key:
+    file: ${SECRETS_DIR}/mistral_api_key
+  jina_api_key:
+    file: ${SECRETS_DIR}/jina_api_key

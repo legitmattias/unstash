@@ -22,12 +22,12 @@ Unstash is built on a hybrid architecture that combines classical information re
 | Frontend | SvelteKit + TypeScript (migration to Next.js planned — ADR 0007) |
 | Backend | FastAPI + Python 3.13 |
 | Database | PostgreSQL 17 + pgvector + pgvectorscale + ParadeDB pg_search |
-| Parsing | Docling + Gotenberg + EasyOCR |
-| Embeddings | Jina AI v4 |
+| Parsing | Docling + Gotenberg; OCR via Mistral OCR (config-switched backend — ADR 0009) |
+| Embeddings | Jina AI v4 (hosted API; config-switched backend) |
 | Clustering | BERTopic |
 | Classification | scikit-learn (calibrated logistic regression) |
 | NER | KB-BERT (Swedish) + GLiNER (zero-shot) |
-| Reranking | BGE-reranker-v2-m3 |
+| Reranking | Hosted rerank API, local cross-encoder as alternative (ADR 0009) |
 | LLM | Mistral (EU-hosted), called surgically |
 | Job queue | Taskiq + Redis |
 | Infrastructure | Docker Compose, Caddy |
@@ -36,7 +36,7 @@ See `docs/adr/` for decision records; `0001-initial-stack-choices.md` covers the
 
 ## Status
 
-Pre-MVP, in active development. Multi-tenant schema with row-level security, authentication, and the document ingestion pipeline (upload → parse → chunk) are in place; embeddings, hybrid search, and classification are the next milestones.
+Pre-MVP, in active development. Multi-tenant schema with row-level security, authentication, and the full document ingestion pipeline are in place: upload (dedup, rate limiting) → parse/convert/OCR → structure-aware chunking → date/amount metadata → embeddings. Hybrid search is the next milestone, followed by clustering and classification.
 
 ## Repository layout
 

@@ -39,6 +39,7 @@ from unstash.auth.manager import _password_helper
 from unstash.config import get_settings
 from unstash.db.engine import dispose_engine, get_admin_engine, get_engine
 from unstash.db.session import get_admin_sessionmaker, get_sessionmaker
+from unstash.documents.conversion import ConversionError
 from unstash.main import create_app
 
 if TYPE_CHECKING:
@@ -122,6 +123,10 @@ async def app_client(
     monkeypatch.setenv("encryption_key", uuid.uuid4().hex)
     monkeypatch.setenv("UNSTASH_ENVIRONMENT", "test")
     monkeypatch.setenv("UNSTASH_DOCUMENTS_ROOT", str(docs_root))
+    monkeypatch.setenv("UNSTASH_EMBEDDER_BACKEND", "fake")
+    # Tiny synthetic fixtures fall below any realistic chars-per-page
+    # threshold; the OCR tests opt back in explicitly.
+    monkeypatch.setenv("UNSTASH_OCR_MIN_CHARS_PER_PAGE", "0")
     # Redirect HuggingFace tokenizer cache so the operator's personal
     # cache is never polluted by tests. The cache is shared across
     # tests in the session because the lru_cache on _get_chunker
@@ -160,15 +165,19 @@ async def _poll_until_terminal(
     slug: str,
     document_id: str,
     *,
-    deadline_seconds: float = 60.0,
+    deadline_seconds: float = 180.0,
 ) -> dict:
-    """Poll the document until status is terminal (parsed/failed/indexed)."""
+    """Poll the document until status is terminal (indexed/failed).
+
+    ``parsed`` is intermediate now — embedding follows it. Generous
+    ceiling: the first parse in a run may cold-load models.
+    """
     async with asyncio.timeout(deadline_seconds):
         while True:
             response = await client.get(f"/api/orgs/{slug}/documents/{document_id}")
             assert response.status_code == 200
             body = response.json()
-            if body["status"] in {"parsed", "failed", "indexed"}:
+            if body["status"] in {"failed", "indexed"}:
                 return body
             await asyncio.sleep(0.1)
 
@@ -189,7 +198,8 @@ async def test_pdf_upload_produces_chunks(
         [
             "Unstash test document — first paragraph.",
             "Second line of content here.",
-            "Third line that mentions BRF Ragstacken's roof.",
+            "Third line that mentions the housing cooperative's roof.",
+            "Beslut 2024-03-15: avgiften blir 1234 kr per manad.",
         ],
     )
 
@@ -205,7 +215,7 @@ async def test_pdf_upload_produces_chunks(
     job_id = body["job_id"]
 
     document = await _poll_until_terminal(app_client, "acme", document_id)
-    assert document["status"] == "parsed", document
+    assert document["status"] == "indexed", document
     assert document["mime_type"] == "application/pdf"
     assert document["pipeline_version"] is not None
     assert document["pipeline_config"] is not None
@@ -214,13 +224,13 @@ async def test_pdf_upload_produces_chunks(
     # (bypassing RLS so the test can read directly without setting GUC).
     async with migrations_pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT chunk_index, text, token_count, embedding IS NULL AS no_embedding "
+            "SELECT chunk_index, text, token_count, embedding IS NOT NULL AS embedded "
             "FROM chunks WHERE document_id = $1 ORDER BY chunk_index",
             uuid.UUID(document_id),
         )
 
     assert len(rows) >= 1
-    assert all(row["no_embedding"] for row in rows), "chunks should not have embeddings yet"
+    assert all(row["embedded"] for row in rows), "chunks should be embedded"
     assert all(row["token_count"] > 0 for row in rows)
     combined = " ".join(row["text"] for row in rows)
     # The exact chunking is up to Docling; check that meaningful content is in there.
@@ -229,6 +239,21 @@ async def test_pdf_upload_produces_chunks(
     job = await app_client.get(f"/api/orgs/acme/jobs/{job_id}")
     assert job.status_code == 200
     assert job.json()["status"] == "succeeded"
+
+    # Metadata extraction ran best-effort during parse: the date and the
+    # amount planted in the PDF text land in document_metadata.
+    async with migrations_pool.acquire() as conn:
+        meta = await conn.fetchrow(
+            "SELECT dates::text, amounts::text, entities, extractor_version "
+            "FROM document_metadata WHERE document_id = $1",
+            uuid.UUID(document_id),
+        )
+    assert meta is not None
+    assert "2024-03-15" in meta["dates"]
+    assert '"SEK"' in meta["amounts"]
+    assert "1234" in meta["amounts"]
+    assert meta["entities"] is None  # NER not wired yet
+    assert meta["extractor_version"]
 
 
 async def test_corrupt_file_lands_in_failed_state(
@@ -333,6 +358,243 @@ async def test_mime_detection_overrides_declared_type(
     document_id = response.json()["document_id"]
 
     document = await _poll_until_terminal(app_client, "acme", document_id)
-    assert document["status"] == "parsed", document
+    assert document["status"] == "indexed", document
     # The detected MIME has overwritten the declared one.
     assert document["mime_type"] == "application/pdf"
+
+
+async def test_legacy_office_converts_then_parses(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A legacy office file is converted to PDF, then parsed into chunks.
+
+    MIME detection is forced to a legacy format so the strategy router
+    picks CONVERT_THEN_EXTRACT, and the Gotenberg call is stubbed to
+    return a real synthetic PDF — so the conversion boundary is faked
+    but the whole downstream Docling parse + chunk persistence is real.
+    """
+    monkeypatch.setattr(
+        "unstash.documents.mime.detect_mime",
+        lambda _path: "application/msword",
+    )
+    converted = tmp_path / "converted_source.pdf"
+    _make_synthetic_pdf(
+        converted,
+        ["Converted legacy protocol.", "Board discussed the roof."],
+    )
+    converted_bytes = converted.read_bytes()
+
+    async def _fake_convert(
+        _source: Path,
+        *,
+        gotenberg_url: str,
+        timeout: float,  # noqa: ASYNC109 — mirrors the real convert_to_pdf signature
+    ) -> bytes:
+        assert gotenberg_url  # settings wired through
+        assert timeout > 0
+        return converted_bytes
+
+    monkeypatch.setattr(
+        "unstash.documents.conversion.convert_to_pdf",
+        _fake_convert,
+    )
+
+    user_a = await _seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
+    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
+    await _seed_membership(migrations_pool, user_a, acme_id)
+
+    legacy = tmp_path / "protocol.doc"
+    legacy.write_bytes(b"pretend legacy word document bytes")
+
+    await _login(app_client, USER_EMAIL, USER_PASSWORD)
+    with legacy.open("rb") as fh:
+        response = await app_client.post(
+            "/api/orgs/acme/documents",
+            files={"file": ("protocol.doc", fh, "application/msword")},
+        )
+    assert response.status_code == 201, response.text
+    document_id = response.json()["document_id"]
+
+    document = await _poll_until_terminal(app_client, "acme", document_id)
+    assert document["status"] == "indexed", document
+    assert document["pipeline_config"]["converted_via"] == "gotenberg"
+    assert document["pipeline_config"]["source_mime"] == "application/msword"
+
+    async with migrations_pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT text, embedding IS NOT NULL AS embedded "
+            "FROM chunks WHERE document_id = $1 ORDER BY chunk_index",
+            uuid.UUID(document_id),
+        )
+    assert len(rows) >= 1
+    assert all(row["embedded"] for row in rows)
+    combined = " ".join(row["text"] for row in rows).lower()
+    assert "protocol" in combined or "roof" in combined
+
+
+async def test_conversion_failure_lands_in_failed_state(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Gotenberg failure transitions the document to ``failed``.
+
+    The conversion error propagates through the normal exception path,
+    so the document ends ``failed`` with the reason in ``parsing_error``
+    and the worker keeps running.
+    """
+    monkeypatch.setattr(
+        "unstash.documents.mime.detect_mime",
+        lambda _path: "application/msword",
+    )
+
+    async def _failing_convert(
+        _source: Path,
+        *,
+        gotenberg_url: str,
+        timeout: float,  # noqa: ASYNC109 — mirrors the real convert_to_pdf signature
+    ) -> bytes:
+        _ = gotenberg_url, timeout
+        msg = "Gotenberg returned 503: LibreOffice is unavailable"
+        raise ConversionError(msg)
+
+    monkeypatch.setattr(
+        "unstash.documents.conversion.convert_to_pdf",
+        _failing_convert,
+    )
+
+    user_a = await _seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
+    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
+    await _seed_membership(migrations_pool, user_a, acme_id)
+
+    legacy = tmp_path / "protocol.doc"
+    legacy.write_bytes(b"pretend legacy word document bytes")
+
+    await _login(app_client, USER_EMAIL, USER_PASSWORD)
+    with legacy.open("rb") as fh:
+        response = await app_client.post(
+            "/api/orgs/acme/documents",
+            files={"file": ("protocol.doc", fh, "application/msword")},
+        )
+    assert response.status_code == 201
+    document_id = response.json()["document_id"]
+
+    document = await _poll_until_terminal(app_client, "acme", document_id)
+    assert document["status"] == "failed", document
+    assert "ConversionError" in document["parsing_error"]
+
+
+def _make_scanned_pdf(path: Path, lines: list[str]) -> None:
+    """Write an image-only PDF (no text layer) — what a scan looks like."""
+    from PIL import Image, ImageDraw, ImageFont  # noqa: PLC0415
+
+    img = Image.new("RGB", (1654, 2339), "white")
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 42)
+    except OSError:
+        font = ImageFont.load_default(size=42)
+    y = 200
+    for line in lines:
+        draw.text((150, y), line, fill="black", font=font)
+        y += 80
+    png = path.with_suffix(".png")
+    img.save(png)
+
+    c = canvas.Canvas(str(path), pagesize=A4)
+    c.drawImage(str(png), 0, 0, width=A4[0], height=A4[1])
+    c.save()
+
+
+async def test_scanned_pdf_goes_through_ocr(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A no-text-layer PDF triggers OCR; chunks come from the OCR markdown.
+
+    The OCR API call is stubbed; everything else — trigger, markdown
+    persistence, re-parse, chunking, provenance — runs for real.
+    """
+    monkeypatch.setenv("UNSTASH_OCR_BACKEND", "mistral")
+    monkeypatch.setenv("UNSTASH_OCR_MIN_CHARS_PER_PAGE", "200")
+    get_settings.cache_clear()
+
+    async def _fake_ocr(
+        _path: Path,
+        *,
+        api_key: str,
+        base_url: str,
+        model: str,
+        timeout: float,  # noqa: ASYNC109 — mirrors the real ocr_pdf_to_markdown signature
+    ) -> str:
+        _ = api_key, base_url, model, timeout
+        return "# Protokoll\n\nStyrelsen beslutade att renovera taket på fastigheten."
+
+    monkeypatch.setattr("unstash.documents.ocr.ocr_pdf_to_markdown", _fake_ocr)
+
+    user_a = await _seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
+    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
+    await _seed_membership(migrations_pool, user_a, acme_id)
+
+    scan = tmp_path / "scan.pdf"
+    _make_scanned_pdf(scan, ["PROTOKOLL", "Taket ska renoveras."])
+
+    await _login(app_client, USER_EMAIL, USER_PASSWORD)
+    with scan.open("rb") as fh:
+        response = await app_client.post(
+            "/api/orgs/acme/documents",
+            files={"file": ("scan.pdf", fh, "application/pdf")},
+        )
+    assert response.status_code == 201, response.text
+    document_id = response.json()["document_id"]
+
+    document = await _poll_until_terminal(app_client, "acme", document_id)
+    assert document["status"] == "indexed", document
+    assert document["pipeline_config"]["ocr_via"] == "mistral"
+    assert document["pipeline_config"]["source_pages"] == 1
+    assert "(ocr via mistral)" in document["pipeline_version"]
+
+    async with migrations_pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT text FROM chunks WHERE document_id = $1 ORDER BY chunk_index",
+            uuid.UUID(document_id),
+        )
+    combined = " ".join(row["text"] for row in rows).lower()
+    assert "taket" in combined
+
+
+async def test_scanned_pdf_with_ocr_off_fails_actionably(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the OCR backend off (default), a scan fails loudly, not silently empty."""
+    monkeypatch.setenv("UNSTASH_OCR_MIN_CHARS_PER_PAGE", "200")
+    get_settings.cache_clear()
+
+    user_a = await _seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
+    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
+    await _seed_membership(migrations_pool, user_a, acme_id)
+
+    scan = tmp_path / "scan.pdf"
+    _make_scanned_pdf(scan, ["PROTOKOLL", "Bara en bild, ingen text."])
+
+    await _login(app_client, USER_EMAIL, USER_PASSWORD)
+    with scan.open("rb") as fh:
+        response = await app_client.post(
+            "/api/orgs/acme/documents",
+            files={"file": ("scan.pdf", fh, "application/pdf")},
+        )
+    assert response.status_code == 201
+    document_id = response.json()["document_id"]
+
+    document = await _poll_until_terminal(app_client, "acme", document_id)
+    assert document["status"] == "failed", document
+    assert "OCR is disabled" in document["parsing_error"]

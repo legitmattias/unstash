@@ -1,12 +1,8 @@
-"""Document ingestion routes and helpers.
+"""Document ingestion helpers.
 
-The HTTP surface (upload, list, single, job-progress) lives in
-:mod:`unstash.documents.router`. The on-disk storage helper and the
-worker task that drives status transitions live alongside.
+The HTTP surface lives in :mod:`unstash.documents.router` and is
+imported from there directly; re-exporting it here would put the router
+in the worker's import chain (circular import via the tasks package).
 """
 
 from __future__ import annotations
-
-from unstash.documents.router import documents_router
-
-__all__ = ["documents_router"]
