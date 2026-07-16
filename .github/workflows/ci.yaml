@@ -29,6 +29,9 @@ jobs:
 
       - uses: astral-sh/setup-uv@v6
         with:
+          # Pinned so the action skips its latest-release API lookup,
+          # which intermittently rate-limits on shared runners.
+          version: "0.9.16"
           enable-cache: true
 
       - uses: actions/setup-python@v5
@@ -54,6 +57,9 @@ jobs:
 
       - uses: astral-sh/setup-uv@v6
         with:
+          # Pinned so the action skips its latest-release API lookup,
+          # which intermittently rate-limits on shared runners.
+          version: "0.9.16"
           enable-cache: true
 
       - uses: actions/setup-python@v5
@@ -76,6 +82,9 @@ jobs:
 
       - uses: astral-sh/setup-uv@v6
         with:
+          # Pinned so the action skips its latest-release API lookup,
+          # which intermittently rate-limits on shared runners.
+          version: "0.9.16"
           enable-cache: true
 
       - uses: actions/setup-python@v5
@@ -299,6 +308,9 @@ jobs:
 
       - uses: astral-sh/setup-uv@v6
         with:
+          # Pinned so the action skips its latest-release API lookup,
+          # which intermittently rate-limits on shared runners.
+          version: "0.9.16"
           enable-cache: true
 
       - uses: actions/setup-python@v5
