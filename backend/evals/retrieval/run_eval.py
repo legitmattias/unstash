@@ -129,7 +129,14 @@ def rank_rrf(vector_ranked: list[str], bm25_ranked: list[str]) -> list[str]:
     return [doc for doc, _ in sorted(scores.items(), key=lambda kv: -kv[1])]
 
 
-async def run(embedder_kind: str, report_path: str | None) -> None:
+SWEDISH_BM25_INDEX = (
+    "CREATE INDEX ix_chunks_text_bm25 ON chunks "
+    "USING bm25 (id, (text::pdb.icu('stemmer=swedish')), org_id) "
+    "WITH (key_field='id')"
+)
+
+
+async def run(embedder_kind: str, report_path: str | None, bm25_tokenizer: str = "icu") -> None:
     from eval_db import fresh_database  # noqa: PLC0415
 
     from unstash.documents.embedder import EmbeddingTask
@@ -138,6 +145,10 @@ async def run(embedder_kind: str, report_path: str | None) -> None:
     embedder = build_embedder(embedder_kind)
 
     async with fresh_database() as pool:
+        if bm25_tokenizer == "swedish":
+            await pool.execute("DROP INDEX ix_chunks_text_bm25")
+            await pool.execute(SWEDISH_BM25_INDEX)
+            print("bm25 index recreated with stemmer=swedish", flush=True)
         await ingest_corpus(pool, embedder)
 
         per_config: dict[str, dict[str, list[float]]] = {
@@ -160,7 +171,10 @@ async def run(embedder_kind: str, report_path: str | None) -> None:
                 cat = q["category"]
                 bucket[f"{cat}/ndcg@10"].append(ndcg_at_k(ranked, judgments, 10))
 
-    lines = [f"# Retrieval eval — embedder={embedder_kind}, {len(golden)} queries", ""]
+    lines = [
+        f"# Retrieval eval — embedder={embedder_kind}, bm25={bm25_tokenizer}, {len(golden)} queries",
+        "",
+    ]
     header = sorted({key for c in per_config.values() for key in c})
     lines.append("| metric | " + " | ".join(per_config) + " |")
     lines.append("|---|" + "---|" * len(per_config))
@@ -185,5 +199,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--embedder", choices=["jina", "fake"], default="jina")
     parser.add_argument("--report", default=None)
+    parser.add_argument("--bm25", choices=["icu", "swedish"], default="icu")
     args = parser.parse_args()
-    asyncio.run(run(args.embedder, args.report))
+    asyncio.run(run(args.embedder, args.report, args.bm25))
