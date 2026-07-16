@@ -21,7 +21,7 @@ from unstash.auth.schemas import UserRead
 from unstash.config import get_settings
 from unstash.db import dispose_engine, get_engine
 from unstash.db.models import User
-from unstash.documents import documents_router
+from unstash.documents.router import documents_router
 from unstash.logging import setup_logging
 from unstash.orgs import orgs_router
 from unstash.startup_checks import (
