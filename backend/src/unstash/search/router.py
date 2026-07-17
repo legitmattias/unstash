@@ -12,7 +12,7 @@ import time
 import uuid  # noqa: TC003
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select, update
 
 from unstash.config import get_settings
@@ -36,20 +36,24 @@ QueryParam = Annotated[str, Query(min_length=1, max_length=1000, alias="q")]
 
 @search_router.get("/orgs/{slug}/search", response_model=SearchResponse)
 async def search(
+    request: Request,
     ctx: OrgContextDep,
     user: CurrentUserDep,
     q: QueryParam,
 ) -> SearchResponse:
     """Run a hybrid search and log it."""
     settings = get_settings()
+    # Absent outside the lifespan (e.g. ASGI test transports); clients
+    # then fall back to a per-call connection.
+    http_client = getattr(request.app.state, "http_client", None)
     started = time.perf_counter()
     try:
         outcome = await run_search(
             ctx.session,
             org_id=ctx.org_id,
             query=q,
-            embedder=get_embedder(settings),
-            reranker=get_reranker(settings),
+            embedder=get_embedder(settings, http_client=http_client),
+            reranker=get_reranker(settings, http_client=http_client),
             settings=settings,
         )
     except EmbeddingError as exc:
