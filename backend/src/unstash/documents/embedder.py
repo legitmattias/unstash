@@ -70,14 +70,21 @@ class JinaEmbedder:
         dimensions: int,
         timeout: float,
         max_retries: int = 3,
+        http_client: httpx.AsyncClient | None = None,
     ) -> None:
-        """Configure the client; no network happens until :meth:`embed`."""
+        """Configure the client; no network happens until :meth:`embed`.
+
+        ``http_client`` shares a connection pool across requests (the
+        caller owns its lifecycle); without it every call pays a fresh
+        TCP + TLS handshake.
+        """
         self._api_key = api_key
         self._url = f"{base_url.rstrip('/')}/embeddings"
         self._model = model
         self._dimensions = dimensions
         self._timeout = timeout
         self._max_retries = max_retries
+        self._http_client = http_client
         self.embedding_dim = dimensions
 
     async def embed(self, texts: list[str], *, task: EmbeddingTask) -> EmbeddingBatch:
@@ -112,25 +119,40 @@ class JinaEmbedder:
         payload: dict[str, object],
         headers: dict[str, str],
     ) -> httpx.Response:
-        last_error: Exception | None = None
+        if self._http_client is not None:
+            return await self._attempt_loop(self._http_client, payload, headers)
         async with httpx.AsyncClient(timeout=self._timeout) as client:
-            for attempt in range(self._max_retries + 1):
-                try:
-                    response = await client.post(self._url, json=payload, headers=headers)
-                except httpx.HTTPError as exc:
-                    last_error = exc
-                else:
-                    if response.is_success:
-                        return response
-                    if response.status_code not in _RETRYABLE_STATUS:
-                        detail = response.text[:300]
-                        msg = f"Jina returned {response.status_code}: {detail}"
-                        raise EmbeddingError(msg)
-                    last_error = EmbeddingError(
-                        f"Jina returned retryable {response.status_code}",
-                    )
-                if attempt < self._max_retries:
-                    await asyncio.sleep(_backoff_seconds(attempt))
+            return await self._attempt_loop(client, payload, headers)
+
+    async def _attempt_loop(
+        self,
+        client: httpx.AsyncClient,
+        payload: dict[str, object],
+        headers: dict[str, str],
+    ) -> httpx.Response:
+        last_error: Exception | None = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                response = await client.post(
+                    self._url,
+                    json=payload,
+                    headers=headers,
+                    timeout=self._timeout,
+                )
+            except httpx.HTTPError as exc:
+                last_error = exc
+            else:
+                if response.is_success:
+                    return response
+                if response.status_code not in _RETRYABLE_STATUS:
+                    detail = response.text[:300]
+                    msg = f"Jina returned {response.status_code}: {detail}"
+                    raise EmbeddingError(msg)
+                last_error = EmbeddingError(
+                    f"Jina returned retryable {response.status_code}",
+                )
+            if attempt < self._max_retries:
+                await asyncio.sleep(_backoff_seconds(attempt))
 
         msg = f"Jina request failed after {self._max_retries + 1} attempts: {last_error}"
         raise EmbeddingError(msg) from last_error
@@ -168,7 +190,11 @@ class FakeEmbedder:
         return [value / norm for value in floats]
 
 
-def get_embedder(settings: Settings) -> Embedder:
+def get_embedder(
+    settings: Settings,
+    *,
+    http_client: httpx.AsyncClient | None = None,
+) -> Embedder:
     """Return the configured embedder: the fake when selected, else Jina."""
     if settings.embedder_backend == "fake":
         return FakeEmbedder(dimensions=settings.jina_embedding_dimensions)
@@ -178,4 +204,5 @@ def get_embedder(settings: Settings) -> Embedder:
         model=settings.jina_embedding_model,
         dimensions=settings.jina_embedding_dimensions,
         timeout=settings.jina_timeout_seconds,
+        http_client=http_client,
     )

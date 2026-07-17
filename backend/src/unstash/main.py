@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Annotated
 
+import httpx
 import structlog
 from fastapi import Depends, FastAPI, HTTPException
 
@@ -76,9 +77,16 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await check_required_extensions(conn)
         await check_schema_at_head(conn)
 
+    # Shared outbound HTTP pool for per-request inference calls (query
+    # embedding, rerank) — avoids a TCP + TLS handshake per search.
+    _app.state.http_client = httpx.AsyncClient(
+        limits=httpx.Limits(max_keepalive_connections=10, keepalive_expiry=30.0),
+    )
+
     try:
         yield
     finally:
+        await _app.state.http_client.aclose()
         await dispose_engine()
         logger.info("stopping")
 
