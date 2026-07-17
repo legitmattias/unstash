@@ -12,7 +12,8 @@ import os
 
 import pytest
 
-from unstash.documents.embedder import EmbeddingTask, JinaEmbedder
+from unstash.documents.embedder import EmbeddingTask
+from unstash.inference.jina import JinaEmbedder
 
 _API_KEY = os.environ.get("JINA_API_KEY")
 

@@ -89,7 +89,8 @@ def normalise(matrix: np.ndarray) -> np.ndarray:
 
 
 async def embed_jina(model: str, dims: int, texts: list[str], task: str) -> np.ndarray:
-    from unstash.documents.embedder import EmbeddingTask, JinaEmbedder
+    from unstash.documents.embedder import EmbeddingTask
+    from unstash.inference.jina import JinaEmbedder
 
     embedder = JinaEmbedder(
         api_key=os.environ["JINA_API_KEY"],
