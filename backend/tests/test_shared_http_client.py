@@ -5,8 +5,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from unstash.documents.embedder import EmbeddingTask, JinaEmbedder
-from unstash.search.reranker import JinaReranker
+from unstash.documents.embedder import EmbeddingTask
+from unstash.inference.jina import JinaEmbedder, JinaReranker
 
 pytestmark = pytest.mark.anyio
 

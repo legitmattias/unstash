@@ -44,7 +44,8 @@ def load_golden() -> list[dict]:
 
 
 def build_embedder(kind: str):
-    from unstash.documents.embedder import FakeEmbedder, JinaEmbedder
+    from unstash.documents.embedder import FakeEmbedder
+    from unstash.inference.jina import JinaEmbedder
 
     if kind == "fake":
         return FakeEmbedder(dimensions=2048)
