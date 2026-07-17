@@ -139,6 +139,33 @@ class Settings(BaseSettings):
     jina_embedding_dimensions: int = Field(default=2048, gt=0)
     jina_timeout_seconds: float = Field(default=60.0, gt=0)
 
+    # -- Search (hybrid retrieval + rerank) -------------------------------------
+    # Fusion defaults come from the measured Phase B experiments on the
+    # golden retrieval set; see backend/evals/retrieval/reports/.
+
+    reranker_backend: str = Field(
+        default="jina",
+        description="Rerank backend: 'jina' (real) or 'fake' (deterministic).",
+    )
+    jina_rerank_model: str = Field(default="jina-reranker-v3")
+    search_candidate_pool: int = Field(
+        default=50,
+        gt=0,
+        description="Chunks fetched per retrieval leg (vector, BM25) before fusion.",
+    )
+    search_rrf_k: int = Field(default=20, gt=0)
+    search_vector_weight: float = Field(default=3.0, gt=0)
+    search_rerank_candidates: int = Field(
+        default=20,
+        gt=0,
+        description="Fused documents sent to the reranker.",
+    )
+    search_result_limit: int = Field(
+        default=10,
+        gt=0,
+        description="Maximum documents returned per search.",
+    )
+
     # -- OCR (scanned PDFs) -----------------------------------------------------
     # 'mistral' sends low-text-density PDFs to the Mistral OCR API;
     # 'off' fails them with an actionable error instead (a scan without

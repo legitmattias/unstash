@@ -24,6 +24,7 @@ from unstash.db.models import User
 from unstash.documents.router import documents_router
 from unstash.logging import setup_logging
 from unstash.orgs import orgs_router
+from unstash.search.router import search_router
 from unstash.startup_checks import (
     check_not_superuser,
     check_required_extensions,
@@ -160,6 +161,12 @@ def create_app() -> FastAPI:
         documents_router,
         prefix="/api",
         tags=["documents"],
+    )
+
+    app.include_router(
+        search_router,
+        prefix="/api",
+        tags=["search"],
     )
 
     return app
