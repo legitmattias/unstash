@@ -16,6 +16,8 @@ services:
       - database_admin_password
       - session_secret
       - encryption_key
+      # Search embeds queries and reranks results from the API process.
+      - jina_api_key
     environment:
       UNSTASH_ENVIRONMENT: production
       UNSTASH_DEBUG: "false"
