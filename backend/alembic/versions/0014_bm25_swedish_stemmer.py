@@ -8,8 +8,6 @@ semantic/decision queries (see evals/retrieval/reports/). English text in
 mixed documents passes through the stemmer mostly untouched; English
 keyword recall was ~zero on this index before and after.
 
-Closes open-topic E.1 (dev-repo notes).
-
 Revision ID: 0014_bm25_sv_stem
 Revises: 0013_org_upload_limit
 Create Date: 2026-07-17

@@ -105,10 +105,9 @@ class Document(Base, TimestampMixin):
         DateTime(timezone=True),
         nullable=True,
     )
-    # Forward-compat fields (see ADR rationale + spine note): which
-    # ingestion pipeline produced this document's chunks, so later
-    # phases can apply PII redaction or rebuild eval golden sets
-    # without re-ingesting.
+    # Forward-compat fields (see migration 0010): which ingestion
+    # pipeline produced this document's chunks, so later work can apply
+    # PII redaction or rebuild eval golden sets without re-ingesting.
     pipeline_version: Mapped[str | None] = mapped_column(Text, nullable=True)
     pipeline_config: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 

@@ -1,9 +1,9 @@
 """Docling-backed parser + HybridChunker integration.
 
-Phase B of M3: given a path to a file that the strategy router has
-marked as ``EXTRACT``, parse it with Docling, run the HybridChunker,
-and return a list of chunks ready for database insertion. The chunks
-have no embedding at this stage — Phase C (M3-C) fills those in.
+Given a path to a file that the strategy router has marked
+``EXTRACT``, parse it with Docling, run the HybridChunker, and return a
+list of chunks ready for database insertion. The chunks have no
+embedding at this stage; the embed task fills those in.
 
 Heavy objects (the Docling converter and the chunker's tokenizer) are
 constructed lazily once per process and reused. The first call pays
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 # Tokenizer used purely for token counting and chunk sizing. The full
 # embedding model (Jina v4) tokenizes slightly differently, but for
 # chunk-size targets a small reusable tokenizer is good enough — the
-# milestone aims for "~500 tokens, ~50 overlap" not bit-exact bounds.
+# target is "~500 tokens, ~50 overlap", not bit-exact bounds.
 _TOKENIZER_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 _CHUNK_TARGET_TOKENS = 500
 
@@ -87,10 +87,10 @@ class ParsedDocument:
 def _get_converter() -> DocumentConverter:
     """Build (or return cached) DocumentConverter.
 
-    OCR is disabled by default — Phase E adds it as an opt-in path
-    triggered by a "low text density per page" heuristic. Table
-    structure detection stays on (BRF protocols have meaningful
-    tables; turning it off would lose information).
+    OCR is disabled here; scanned PDFs take a separate opt-in OCR path
+    triggered by a low-text-density-per-page heuristic. Table structure
+    detection stays on, since meeting minutes and similar documents
+    carry meaningful tables that would otherwise be lost.
     """
     opts = PdfPipelineOptions(do_ocr=False, do_table_structure=True)
     return DocumentConverter(

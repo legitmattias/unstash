@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 
 # Jina v4 native embedding dimension. Matryoshka means a leading subset can be
 # indexed later (pgvectorscale `num_dimensions`) without re-embedding; the
-# full vector is stored regardless. Revisited at M3 against real data.
+# full vector is stored regardless.
 EMBEDDING_DIM = 2048
 
 
@@ -85,9 +85,9 @@ class Chunk(Base):
     token_count: Mapped[int] = mapped_column(Integer, nullable=False)
     char_offset_start: Mapped[int] = mapped_column(Integer, nullable=False)
     char_offset_end: Mapped[int] = mapped_column(Integer, nullable=False)
-    # Nullable because parsing (M3-B) writes chunks before embedding (M3-C).
-    # The DiskANN index naturally skips NULL rows, so search results never
-    # contain a chunk that hasn't been embedded yet.
+    # Nullable because parsing writes chunks before embedding. The DiskANN
+    # index naturally skips NULL rows, so search results never contain a
+    # chunk that hasn't been embedded yet.
     embedding: Mapped[list[float] | None] = mapped_column(
         Vector(EMBEDDING_DIM),
         nullable=True,

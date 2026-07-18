@@ -1,16 +1,16 @@
 """Job progress and audit log.
 
-Adds two operational tables that close out Phase B's schema work:
+Adds two operational tables:
 
   - ``job_progress`` mirrors Taskiq's task state so the API and UI can
     surface progress to users without depending on Taskiq's internal
     storage.
   - ``audit_log`` is the append-only record of org-scoped actions
     (uploads, member changes, role updates, connector lifecycle, etc.).
-    Pre-org events such as signup are not logged here.
 
-``audit_log.org_id`` is NOT NULL — see the M2 Phase B plan for the
-rationale.
+``audit_log.org_id`` is NOT NULL: only org-scoped actions are recorded
+here, so every row belongs to an org. Pre-org events such as signup are
+not logged in this table.
 
 Revision ID: 0005_jobs_and_audit
 Revises: 0004_search_logs

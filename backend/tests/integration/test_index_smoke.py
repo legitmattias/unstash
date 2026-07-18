@@ -1,9 +1,9 @@
 """Smoke test for the chunks DiskANN + pg_search indexes.
 
-Both indexes are created via raw SQL in migration 0002 and are first
-queried by the M4 hybrid-search path. This test proves they answer
-queries now — catching an opclass/dimension or ICU-tokenizer
-misconfiguration before search is built on top of them.
+Both indexes are created via raw SQL in migration 0002 and are queried
+by the hybrid-search path. This test proves they answer queries —
+catching an opclass/dimension or ICU-tokenizer misconfiguration before
+search is built on top of them.
 """
 
 from __future__ import annotations

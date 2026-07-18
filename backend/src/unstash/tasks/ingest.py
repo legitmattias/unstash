@@ -337,9 +337,9 @@ async def _run_parse(
         return
 
     if strategy is ParseStrategy.METADATA_ONLY:
-        # Recognised but not chunkable in this phase. Record provenance
-        # so a later metadata-extraction phase knows this document was
-        # seen by the M3-B pipeline.
+        # Recognised but not chunkable. Record provenance so later
+        # metadata extraction knows this document was seen by the
+        # parse pipeline.
         document.pipeline_version = f"{PIPELINE_VERSION} (metadata_only)"
         document.pipeline_config = {"strategy": "metadata_only", "detected_mime": mime}
         return

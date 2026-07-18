@@ -12,8 +12,8 @@ class UserRead(schemas.BaseUser[uuid.UUID]):
 
 
 class UserCreate(schemas.BaseUserCreate):
-    """Payload for creating a user (admin endpoint, PR 2)."""
+    """Payload for creating a user via the admin endpoint."""
 
 
 class UserUpdate(schemas.BaseUserUpdate):
-    """Payload for updating a user (admin endpoint, PR 2)."""
+    """Payload for updating a user via the admin endpoint."""

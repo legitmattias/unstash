@@ -4,7 +4,7 @@ FastAPI backend for Unstash.
 
 ## Stack
 
-- FastAPI + Python 3.12+
+- FastAPI + Python 3.13+
 - SQLAlchemy 2.0 async with asyncpg
 - Pydantic for validation and settings
 - FastAPI-Users for authentication

@@ -4,6 +4,16 @@ Single source of truth for the synthetic evaluation corpus. Every generated
 document must be consistent with these facts. All names, companies, numbers,
 and events are invented; name collisions with reality are coincidental.
 
+Some invented values may nonetheless coincide with real ones. The
+cooperative's organisation number uses a checksum-valid pattern in the real
+bostadsrättsförening range; the address uses a real street name and postal
+area; and some contractor names and web domains may match real registered
+companies. None reference a real entity's data — the coincidences are
+structural, not sourced. Treated as an accepted, recorded property of the
+corpus so measured benchmark numbers stay tied to a stable artifact; if the
+corpus is ever regenerated or the repository is made public, swap these for
+clearly-fictional equivalents at that point.
+
 ## The cooperative
 
 - **Brf Gröndalen**, org.nr 769600-1234 (fictional range), founded 1962.

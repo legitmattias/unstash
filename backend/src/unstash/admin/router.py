@@ -52,7 +52,7 @@ async def create_user(
     user_manager: UserManagerDep,
     _superuser: SuperuserDep,
 ) -> User:
-    """Create a user. Operator-only (no self-signup in this milestone)."""
+    """Create a user. Operator-only (no self-signup)."""
     user_create = UserCreate(
         email=payload.email,
         password=payload.password,

@@ -1,10 +1,9 @@
 """Sanity check: the worker-side org context sets the right RLS GUC.
 
 This is the worker equivalent of the request-side test in
-``test_orgs.py``. Where ``get_org_scoped_session`` sets
-``app.current_org_id`` for the duration of an HTTP request,
-:func:`unstash.tasks.org_context` does the same for the duration of a
-Taskiq job body.
+``test_orgs.py``. Where ``get_org_context`` sets ``app.current_org_id``
+for the duration of an HTTP request, :func:`unstash.tasks.org_context`
+does the same for the duration of a Taskiq job body.
 
 The test:
 

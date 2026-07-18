@@ -36,7 +36,7 @@ See `docs/adr/` for decision records; `0001-initial-stack-choices.md` covers the
 
 ## Status
 
-Pre-MVP, in active development. Multi-tenant schema with row-level security, authentication, and the full document ingestion pipeline are in place: upload (dedup, rate limiting) → parse/convert/OCR → structure-aware chunking → date/amount metadata → embeddings. Hybrid search is the next milestone, followed by clustering and classification.
+Pre-MVP, in active development. Multi-tenant schema with row-level security, authentication, the full document ingestion pipeline (upload with dedup and rate limiting → parse/convert/OCR → structure-aware chunking → date/amount metadata → embeddings), and hybrid search (vector + BM25 fused via RRF, with reranking) are in place. Clustering and classification follow.
 
 ## Repository layout
 

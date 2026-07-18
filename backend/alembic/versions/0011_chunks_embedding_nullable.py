@@ -1,11 +1,9 @@
 """Make chunks.embedding nullable.
 
-Closes ``notes/open-topics-and-edge-cases.md`` section E.3 (referenced
-in the M3 plan): the original M2 schema declared ``chunks.embedding``
-as NOT NULL, anticipating that every chunk would always carry an
-embedding. M3-B (this PR) decouples parsing from embedding — the
-worker writes chunks during parsing with NULL embeddings, and the
-embed step in M3-C fills them in later.
+The original schema declared ``chunks.embedding`` NOT NULL, anticipating
+that every chunk would always carry an embedding. Parsing and embedding
+now run as separate pipeline steps: the worker writes chunks with NULL
+embeddings during parsing, and a later embed step fills them in.
 
 The DiskANN index on ``embedding`` is unaffected: pgvector indexes
 naturally skip NULL values, so queries against the index return only
@@ -50,7 +48,7 @@ def downgrade() -> None:
 
     This downgrade is **destructive** when the database holds rows
     with NULL embeddings — typically the parsed-but-not-yet-embedded
-    window introduced by M3-B. The DELETE here removes those rows so
+    window. The DELETE here removes those rows so
     the ALTER can succeed; in production an operator should re-run
     embedding generation to recreate them.
 

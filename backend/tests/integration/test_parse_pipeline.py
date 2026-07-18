@@ -1,10 +1,8 @@
-"""End-to-end parse pipeline tests for M3-B.
+"""End-to-end parse pipeline tests.
 
-The Phase A PR tested the upload + status-transition plumbing using
-a no-op task stub. This file replaces those scenarios with the real
-parse pipeline: upload a synthetic PDF, the worker runs Docling,
-chunks land in the database with NULL embeddings, document moves to
-``parsed`` and the job to ``succeeded``.
+Upload a synthetic PDF, the worker runs Docling, chunks land in the
+database with NULL embeddings, the document moves to ``parsed`` and the
+job to ``succeeded``.
 
 Synthetic PDFs are generated at test time via ``reportlab`` so no
 binary fixtures live in the repo. Adversarial cases (corrupt files,

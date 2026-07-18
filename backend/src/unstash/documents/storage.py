@@ -9,8 +9,7 @@ the upload path.
 
 The streaming write here computes the SHA-256 hash in flight, so the
 caller does not need a second pass over the bytes. The hash doubles
-as the deduplication key (Phase E will check it against existing
-documents in the same org).
+as the per-org deduplication key.
 """
 
 from __future__ import annotations
