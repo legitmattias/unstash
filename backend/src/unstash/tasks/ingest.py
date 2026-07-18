@@ -313,6 +313,7 @@ async def _run_parse(
         pdf_bytes = await convert_to_pdf(
             file_path,
             gotenberg_url=settings.gotenberg_url,
+            max_bytes=settings.external_processing_max_bytes,
             timeout=settings.gotenberg_timeout_seconds,
         )
         # Keep the converted PDF beside the original so a future
@@ -394,6 +395,7 @@ async def _ocr_if_scanned(
         api_key=settings.mistral_api_key,
         base_url=settings.mistral_base_url,
         model=settings.mistral_ocr_model,
+        max_bytes=settings.external_processing_max_bytes,
         timeout=settings.mistral_timeout_seconds,
     )
     # Keep the OCR text beside the original so re-parsing doesn't re-OCR.

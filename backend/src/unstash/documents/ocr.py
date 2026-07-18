@@ -39,18 +39,22 @@ def needs_ocr(*, page_count: int, total_chars: int, min_chars_per_page: int) -> 
     return (total_chars / page_count) < min_chars_per_page
 
 
-async def ocr_pdf_to_markdown(
+async def ocr_pdf_to_markdown(  # noqa: PLR0913 — provider config; grouping into an object buys nothing
     source_path: Path,
     *,
     api_key: str,
     base_url: str,
     model: str,
+    max_bytes: int,
     timeout: float,  # noqa: ASYNC109 — httpx owns the timeout; no asyncio.timeout wrapper wanted
 ) -> str:
     """Return the document's text as markdown, one section per page.
 
-    Raises :class:`OcrError` on an unreadable source, transport failure,
-    non-2xx response, or an empty OCR result.
+    ``max_bytes`` caps the source read before base64-encoding, so a large
+    scan cannot inflate into an oversized in-memory payload to the API.
+
+    Raises :class:`OcrError` on an unreadable or oversized source,
+    transport failure, non-2xx response, or an empty OCR result.
     """
     url = f"{base_url.rstrip('/')}{_OCR_ROUTE}"
 
@@ -59,6 +63,10 @@ async def ocr_pdf_to_markdown(
     except OSError as exc:
         msg = f"Could not read source file for OCR: {exc}"
         raise OcrError(msg) from exc
+
+    if len(payload) > max_bytes:
+        msg = f"Document is {len(payload)} bytes, over the {max_bytes}-byte OCR limit."
+        raise OcrError(msg)
 
     document_url = "data:application/pdf;base64," + base64.b64encode(payload).decode()
     body = {

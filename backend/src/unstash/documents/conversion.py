@@ -32,14 +32,18 @@ async def convert_to_pdf(
     source_path: Path,
     *,
     gotenberg_url: str,
+    max_bytes: int,
     timeout: float,  # noqa: ASYNC109 — httpx owns the timeout; no asyncio.timeout wrapper wanted
 ) -> bytes:
     """Convert the office document at ``source_path`` to PDF bytes.
 
+    ``max_bytes`` caps the source read so a large document cannot be held
+    whole in memory before conversion.
+
     Posts the file to Gotenberg's LibreOffice route and returns the
-    resulting PDF. Raises :class:`ConversionError` on an unreadable
-    source, any transport error, or a non-2xx response — carrying
-    Gotenberg's message so the failure is actionable in triage.
+    resulting PDF. Raises :class:`ConversionError` on an unreadable or
+    oversized source, any transport error, or a non-2xx response —
+    carrying Gotenberg's message so the failure is actionable in triage.
     """
     url = f"{gotenberg_url.rstrip('/')}{_LIBREOFFICE_ROUTE}"
 
@@ -48,6 +52,10 @@ async def convert_to_pdf(
     except OSError as exc:
         msg = f"Could not read source file for conversion: {exc}"
         raise ConversionError(msg) from exc
+
+    if len(payload) > max_bytes:
+        msg = f"Document is {len(payload)} bytes, over the {max_bytes}-byte conversion limit."
+        raise ConversionError(msg)
 
     files = {"files": (source_path.name, payload)}
     try:

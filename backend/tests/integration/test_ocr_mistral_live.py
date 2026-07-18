@@ -57,6 +57,7 @@ async def test_mistral_ocr_reads_swedish_scan(tmp_path: Path) -> None:
         api_key=_API_KEY or "",
         base_url="https://api.mistral.ai",
         model="mistral-ocr-latest",
+        max_bytes=50 * 1024 * 1024,
         timeout=120.0,
     )
 

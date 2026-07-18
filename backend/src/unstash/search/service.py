@@ -124,6 +124,15 @@ async def run_search(  # noqa: PLR0913 — pipeline inputs; grouping into an obj
     batch = await embedder.embed([query], task=EmbeddingTask.QUERY)
     query_vec = "[" + ",".join(str(v) for v in batch.vectors[0]) + "]"
 
+    # Bound retrieval so a pathological BM25 query (wildcards, large fuzzy
+    # expansions) cannot pressure the database. Transaction-local; a BM25
+    # timeout is caught by its savepoint below and degrades to vector-only.
+    await session.execute(
+        text("SELECT set_config('statement_timeout', :timeout_ms, true)").bindparams(
+            timeout_ms=str(settings.search_statement_timeout_ms),
+        ),
+    )
+
     pool = settings.search_candidate_pool
     vector_rows: Sequence[RowMapping] = (
         (
