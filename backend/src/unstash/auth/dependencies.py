@@ -9,6 +9,7 @@ should use :func:`current_user_or_token` instead of
 from __future__ import annotations
 
 import contextlib
+import uuid  # noqa: TC003 — referenced in a runtime-evaluated return annotation
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -27,6 +28,11 @@ from unstash.db.models import ApiToken, User
 from unstash.db.session import get_session_unmanaged
 
 logger = structlog.get_logger(__name__)
+
+# Request-state attribute carrying the org scope of an authenticating
+# Bearer token (None for cookie auth or an unscoped token). Read by the
+# org-scoping dependency to enforce ApiToken.org_id.
+BEARER_ORG_STATE = "bearer_org_scope"
 
 
 current_active_user = fastapi_users.current_user(active=True)
@@ -53,8 +59,16 @@ def _extract_bearer(request: Request) -> str | None:
     return parts[1].strip() or None
 
 
-async def _resolve_token(session: AsyncSession, plaintext: str) -> User | None:
-    """Look up the user behind a plaintext token, or None if not valid."""
+async def _resolve_token(
+    session: AsyncSession,
+    plaintext: str,
+) -> tuple[User, uuid.UUID | None] | None:
+    """Resolve a plaintext token to its user and org scope, or None.
+
+    The second tuple element is the token's ``org_id`` scope (None for an
+    unscoped token). It is read before the ``last_used_at`` commit so it
+    does not depend on the row staying loaded afterwards.
+    """
     if not looks_like_unstash_token(plaintext):
         return None
     candidate_hash = hash_token(plaintext)
@@ -75,12 +89,13 @@ async def _resolve_token(session: AsyncSession, plaintext: str) -> User | None:
     user = await session.get(User, token_row.user_id)
     if user is None or not user.is_active:
         return None
+    token_org_id = token_row.org_id
     # Best-effort touch of last_used_at. Failure here must not break
     # the request — auth has already succeeded.
     with contextlib.suppress(Exception):
         token_row.last_used_at = datetime.now(UTC)
         await session.commit()
-    return user
+    return user, token_org_id
 
 
 async def current_user_or_token(
@@ -94,15 +109,22 @@ async def current_user_or_token(
     resolve (malformed, unknown, revoked, expired, deleted user) is a
     hard 401 — we do not silently fall back to the cookie, because that
     would mask token problems and confuse the caller.
+
+    A resolving Bearer token records its org scope on
+    ``request.state.<BEARER_ORG_STATE>`` for the org-scoping dependency
+    to enforce; cookie auth leaves it None (unrestricted).
     """
+    setattr(request.state, BEARER_ORG_STATE, None)
     bearer = _extract_bearer(request)
     if bearer is not None:
-        user = await _resolve_token(session, bearer)
-        if user is None:
+        resolved = await _resolve_token(session, bearer)
+        if resolved is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or expired token.",
             )
+        user, token_org_id = resolved
+        setattr(request.state, BEARER_ORG_STATE, token_org_id)
         return user
     if cookie_user is None:
         raise HTTPException(

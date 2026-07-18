@@ -142,11 +142,14 @@ async def _create_token(
     user_id: uuid.UUID,
     name: str = "test-token",
     expires_at: datetime | None = None,
+    org_id: uuid.UUID | None = None,
 ) -> dict:
     """Helper: log in as superuser, mint a token, return the response body."""
     payload: dict = {"name": name}
     if expires_at is not None:
         payload["expires_at"] = expires_at.isoformat()
+    if org_id is not None:
+        payload["org_id"] = str(org_id)
     response = await client.post(
         f"/api/admin/users/{user_id}/tokens",
         json=payload,
@@ -218,6 +221,85 @@ async def test_token_authenticates_against_org_route(
     )
     assert response.status_code == 200, response.text
     assert response.json()["user_id"] == str(user_id)
+
+
+async def test_org_scoped_token_works_on_its_own_org(
+    app_client: AsyncClient,
+    superuser_id: uuid.UUID,
+    user_id: uuid.UUID,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """A token scoped to an org authenticates on that org's routes."""
+    _ = superuser_id
+    org_id = await _seed_org(migrations_pool, "acme", "Acme")
+    await _seed_membership(migrations_pool, user_id, org_id)
+
+    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    body = await _create_token(app_client, user_id, org_id=org_id)
+    assert body["org_id"] == str(org_id)
+
+    app_client.cookies.clear()
+    response = await app_client.get(
+        "/api/orgs/acme/me",
+        headers={"Authorization": f"Bearer {body['token']}"},
+    )
+    assert response.status_code == 200, response.text
+
+
+async def test_org_scoped_token_rejected_on_other_org(
+    app_client: AsyncClient,
+    superuser_id: uuid.UUID,
+    user_id: uuid.UUID,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """A token scoped to org A cannot reach org B, even for a member of both."""
+    _ = superuser_id
+    org_a = await _seed_org(migrations_pool, "acme", "Acme")
+    org_b = await _seed_org(migrations_pool, "globex", "Globex")
+    await _seed_membership(migrations_pool, user_id, org_a)
+    await _seed_membership(migrations_pool, user_id, org_b)
+
+    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    body = await _create_token(app_client, user_id, org_id=org_a)
+
+    app_client.cookies.clear()
+    # The user is a member of Globex, so only the token scope blocks this.
+    response = await app_client.get(
+        "/api/orgs/globex/me",
+        headers={"Authorization": f"Bearer {body['token']}"},
+    )
+    assert response.status_code == 403, response.text
+
+    # Sanity: the same token still works on its own org.
+    own = await app_client.get(
+        "/api/orgs/acme/me",
+        headers={"Authorization": f"Bearer {body['token']}"},
+    )
+    assert own.status_code == 200, own.text
+
+
+async def test_unscoped_token_works_on_any_member_org(
+    app_client: AsyncClient,
+    superuser_id: uuid.UUID,
+    user_id: uuid.UUID,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """An unscoped token (org_id NULL) reaches every org the user belongs to."""
+    _ = superuser_id
+    await _seed_org(migrations_pool, "acme", "Acme")
+    org_b = await _seed_org(migrations_pool, "globex", "Globex")
+    await _seed_membership(migrations_pool, user_id, org_b)
+
+    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    body = await _create_token(app_client, user_id)
+    assert body["org_id"] is None
+
+    app_client.cookies.clear()
+    response = await app_client.get(
+        "/api/orgs/globex/me",
+        headers={"Authorization": f"Bearer {body['token']}"},
+    )
+    assert response.status_code == 200, response.text
 
 
 async def test_revoked_token_rejected(

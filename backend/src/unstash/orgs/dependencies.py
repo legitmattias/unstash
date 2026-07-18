@@ -18,10 +18,10 @@ import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select, text
 
-from unstash.auth.dependencies import current_user_or_token
+from unstash.auth.dependencies import BEARER_ORG_STATE, current_user_or_token
 from unstash.db.models import Organisation, OrgMembership, User
 from unstash.db.session import get_sessionmaker
 
@@ -43,6 +43,7 @@ class OrgContext:
 
 
 async def get_org_context(
+    request: Request,
     slug: str,
     user: CurrentUserDep,
 ) -> AsyncIterator[OrgContext]:
@@ -55,9 +56,14 @@ async def get_org_context(
     RLS-narrowed query against ``org_memberships``, then yields. The
     transaction commits on clean exit and rolls back on exception.
 
+    An org-scoped Bearer token (``ApiToken.org_id`` set) may only reach
+    its own org; a request whose slug resolves to a different org is
+    rejected with 403.
+
     Raises:
+        HTTPException(403): an org-scoped token is used against a
+            different org, or the user is not a member of the org.
         HTTPException(404): the slug does not resolve to an organisation.
-        HTTPException(403): the user is not a member of the org.
     """
     sessionmaker = get_sessionmaker()
     async with sessionmaker() as session, session.begin():
@@ -67,6 +73,13 @@ async def get_org_context(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Organisation not found.",
+            )
+
+        token_org_id = getattr(request.state, BEARER_ORG_STATE, None)
+        if token_org_id is not None and token_org_id != org_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Token is not scoped to this organisation.",
             )
 
         await session.execute(
