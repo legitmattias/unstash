@@ -17,13 +17,13 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import aiofiles
 
 if TYPE_CHECKING:
     import uuid
-    from pathlib import Path
 
     from fastapi import UploadFile
 
@@ -33,6 +33,24 @@ _READ_CHUNK_SIZE = 64 * 1024  # 64 KiB streaming chunks
 
 class UploadTooLargeError(Exception):
     """Raised when an upload exceeds the configured maximum byte size."""
+
+
+class UnsafeStoragePathError(Exception):
+    """Raised when a resolved storage path escapes its document directory."""
+
+
+def safe_storage_leaf(filename: str | None, document_id: uuid.UUID) -> str:
+    """Reduce a client-supplied filename to a safe path leaf.
+
+    Only the basename is kept, so path separators and parent references
+    in the supplied name cannot move the write outside the document
+    directory. Names that reduce to empty, ``.`` or ``..`` fall back to
+    a deterministic name derived from the document id.
+    """
+    leaf = Path(filename).name if filename else ""
+    if leaf in {"", ".", ".."}:
+        return f"{document_id}.bin"
+    return leaf
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,18 +74,20 @@ async def write_uploaded_file(
     Creates the org/document subdirectories if missing. Enforces
     ``max_bytes`` while streaming — raises :class:`UploadTooLargeError`
     as soon as the limit is exceeded, deleting the partial file to
-    avoid disk leakage. The original filename is preserved verbatim
-    as the leaf name; the caller is responsible for sanitisation if
-    needed.
+    avoid disk leakage. The client-supplied filename is reduced to a
+    safe basename (see :func:`safe_storage_leaf`) so it cannot direct
+    the write outside the document directory.
     """
-    # FastAPI's UploadFile.filename is Optional but in practice always
-    # set on multipart form fields; defend against the edge case by
-    # giving the file a deterministic name.
-    filename = upload.filename if upload.filename is not None else f"{document_id}.bin"
-
     target_dir = documents_root / str(org_id) / str(document_id)
     target_dir.mkdir(parents=True, exist_ok=True)
-    target_path = target_dir / filename
+    target_path = target_dir / safe_storage_leaf(upload.filename, document_id)
+
+    # The leaf is already a basename; this is a defence-in-depth backstop
+    # against future changes to the leaf logic, and turns any escape into
+    # a clear error rather than an out-of-tree write.
+    if not target_path.resolve().is_relative_to(target_dir.resolve()):
+        msg = "Resolved upload path escapes the document directory."
+        raise UnsafeStoragePathError(msg)
 
     hasher = hashlib.sha256()
     written = 0
