@@ -24,6 +24,10 @@ jobs:
   # ── Gate: CI must pass before anything else runs ─────────
   ci:
     uses: ./.github/workflows/ci.yaml
+    # This is the trusted post-merge path; passing secrets here lets the
+    # live-API contract tests run before a deploy. pull_request runs of
+    # ci.yaml do not inherit these (see the integration-test env gating).
+    secrets: inherit
 
   # ── Build and push Docker images to GHCR ─────────────────
   build-and-push:

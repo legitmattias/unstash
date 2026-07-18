@@ -336,11 +336,16 @@ jobs:
         working-directory: backend
         env:
           # HF_TOKEN lifts the HuggingFace Hub anonymous rate limit so
-          # parallel test runs downloading the tokenizer don't hit 429.
+          # parallel test runs downloading the tokenizer don't hit 429. A
+          # free read token; kept on all runs to keep model downloads
+          # reliable.
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          # Opt-in: the live Jina/Mistral tests run only when set.
-          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
-          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          # Paid live-API keys are provided only on the trusted post-merge
+          # (workflow_call) path, never on pull_request runs where a PR's
+          # own test changes could exfiltrate them. On PRs the opt-in live
+          # Jina/Mistral tests simply skip.
+          JINA_API_KEY: ${{ github.event_name != 'pull_request' && secrets.JINA_API_KEY || '' }}
+          MISTRAL_API_KEY: ${{ github.event_name != 'pull_request' && secrets.MISTRAL_API_KEY || '' }}
         run: uv run pytest tests/integration --no-cov
 
   # ---------------------------------------------------------------------------
