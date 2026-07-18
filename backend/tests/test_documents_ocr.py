@@ -31,12 +31,13 @@ def _install_transport(monkeypatch: pytest.MonkeyPatch, handler: Handler) -> Non
     monkeypatch.setattr(ocr_module.httpx, "AsyncClient", factory)
 
 
-async def _call(path: Path) -> str:
+async def _call(path: Path, max_bytes: int = 10 * 1024 * 1024) -> str:
     return await ocr_pdf_to_markdown(
         path,
         api_key="k",
         base_url=_URL,
         model=_MODEL,
+        max_bytes=max_bytes,
         timeout=10.0,
     )
 
@@ -139,3 +140,17 @@ async def test_empty_result_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 async def test_unreadable_source_raises(tmp_path: Path) -> None:
     with pytest.raises(OcrError):
         await _call(tmp_path / "missing.pdf")
+
+
+async def test_oversized_source_raises_before_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _boom(_request: httpx.Request) -> httpx.Response:
+        pytest.fail("no request should be sent for an oversized document")
+
+    _install_transport(monkeypatch, _boom)
+    source = tmp_path / "huge.pdf"
+    source.write_bytes(b"x" * 2048)
+    with pytest.raises(OcrError, match="OCR limit"):
+        await _call(source, max_bytes=1024)

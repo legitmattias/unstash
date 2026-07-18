@@ -389,9 +389,11 @@ async def test_legacy_office_converts_then_parses(
         _source: Path,
         *,
         gotenberg_url: str,
+        max_bytes: int,
         timeout: float,  # noqa: ASYNC109 — mirrors the real convert_to_pdf signature
     ) -> bytes:
         assert gotenberg_url  # settings wired through
+        assert max_bytes > 0
         assert timeout > 0
         return converted_bytes
 
@@ -454,9 +456,10 @@ async def test_conversion_failure_lands_in_failed_state(
         _source: Path,
         *,
         gotenberg_url: str,
+        max_bytes: int,
         timeout: float,  # noqa: ASYNC109 — mirrors the real convert_to_pdf signature
     ) -> bytes:
-        _ = gotenberg_url, timeout
+        _ = gotenberg_url, max_bytes, timeout
         msg = "Gotenberg returned 503: LibreOffice is unavailable"
         raise ConversionError(msg)
 
@@ -529,9 +532,10 @@ async def test_scanned_pdf_goes_through_ocr(
         api_key: str,
         base_url: str,
         model: str,
+        max_bytes: int,
         timeout: float,  # noqa: ASYNC109 — mirrors the real ocr_pdf_to_markdown signature
     ) -> str:
-        _ = api_key, base_url, model, timeout
+        _ = api_key, base_url, model, max_bytes, timeout
         return "# Protokoll\n\nStyrelsen beslutade att renovera taket på fastigheten."
 
     monkeypatch.setattr("unstash.documents.ocr.ocr_pdf_to_markdown", _fake_ocr)

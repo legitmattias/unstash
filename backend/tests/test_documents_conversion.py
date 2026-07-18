@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 _URL = "http://gotenberg:3000"
 _TIMEOUT = 30.0
+_MAX_BYTES = 10 * 1024 * 1024
 
 Handler = Callable[[httpx.Request], httpx.Response]
 
@@ -54,7 +55,9 @@ async def test_posts_file_to_libreoffice_route_and_returns_pdf(
 
     _install_transport(monkeypatch, handler)
 
-    result = await convert_to_pdf(source, gotenberg_url=_URL, timeout=_TIMEOUT)
+    result = await convert_to_pdf(
+        source, gotenberg_url=_URL, max_bytes=_MAX_BYTES, timeout=_TIMEOUT
+    )
 
     assert result == b"%PDF-1.7 converted"
     assert captured["url"] == f"{_URL}/forms/libreoffice/convert"
@@ -82,7 +85,7 @@ async def test_trailing_slash_in_base_url_is_normalised(
 
     _install_transport(monkeypatch, handler)
 
-    await convert_to_pdf(source, gotenberg_url=f"{_URL}/", timeout=_TIMEOUT)
+    await convert_to_pdf(source, gotenberg_url=f"{_URL}/", max_bytes=_MAX_BYTES, timeout=_TIMEOUT)
 
     assert seen["url"] == f"{_URL}/forms/libreoffice/convert"
 
@@ -100,7 +103,7 @@ async def test_non_success_status_raises_conversion_error(
     _install_transport(monkeypatch, handler)
 
     with pytest.raises(ConversionError) as excinfo:
-        await convert_to_pdf(source, gotenberg_url=_URL, timeout=_TIMEOUT)
+        await convert_to_pdf(source, gotenberg_url=_URL, max_bytes=_MAX_BYTES, timeout=_TIMEOUT)
 
     assert "503" in str(excinfo.value)
     assert "LibreOffice is unavailable" in str(excinfo.value)
@@ -120,7 +123,7 @@ async def test_transport_error_raises_conversion_error(
     _install_transport(monkeypatch, handler)
 
     with pytest.raises(ConversionError):
-        await convert_to_pdf(source, gotenberg_url=_URL, timeout=_TIMEOUT)
+        await convert_to_pdf(source, gotenberg_url=_URL, max_bytes=_MAX_BYTES, timeout=_TIMEOUT)
 
 
 async def test_unreadable_source_raises_conversion_error(
@@ -131,4 +134,18 @@ async def test_unreadable_source_raises_conversion_error(
 
     # No transport install needed — the read fails before any request.
     with pytest.raises(ConversionError):
-        await convert_to_pdf(missing, gotenberg_url=_URL, timeout=_TIMEOUT)
+        await convert_to_pdf(missing, gotenberg_url=_URL, max_bytes=_MAX_BYTES, timeout=_TIMEOUT)
+
+
+async def test_oversized_source_raises_before_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _boom(_request: httpx.Request) -> httpx.Response:
+        pytest.fail("no request should be sent for an oversized document")
+
+    _install_transport(monkeypatch, _boom)
+    source = tmp_path / "huge.doc"
+    source.write_bytes(b"x" * 2048)
+    with pytest.raises(ConversionError, match="conversion limit"):
+        await convert_to_pdf(source, gotenberg_url=_URL, max_bytes=1024, timeout=_TIMEOUT)

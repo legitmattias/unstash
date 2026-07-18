@@ -165,6 +165,11 @@ class Settings(BaseSettings):
         gt=0,
         description="Maximum documents returned per search.",
     )
+    search_statement_timeout_ms: int = Field(
+        default=3000,
+        gt=0,
+        description="Per-statement timeout (ms) bounding the retrieval queries.",
+    )
 
     # -- OCR (scanned PDFs) -----------------------------------------------------
     # 'mistral' sends low-text-density PDFs to the Mistral OCR API;
@@ -183,6 +188,15 @@ class Settings(BaseSettings):
     mistral_base_url: str = Field(default="https://api.mistral.ai")
     mistral_ocr_model: str = Field(default="mistral-ocr-latest")
     mistral_timeout_seconds: float = Field(default=120.0, gt=0)
+
+    # Ceiling on a single document sent to an external processor (OCR API,
+    # Gotenberg). Below the upload cap: bounds the in-memory payload
+    # (OCR base64-encodes, adding ~33%) independently of the upload limit.
+    external_processing_max_bytes: int = Field(
+        default=50 * 1024 * 1024,
+        gt=0,
+        description="Max bytes for a document sent to OCR or conversion.",
+    )
 
     # -- NER (named-entity recognition) ----------------------------------------
     # 'off' disables entity extraction (the default until it is wired into
