@@ -13,11 +13,11 @@ vector order for the request.
 
 from __future__ import annotations
 
-import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import structlog
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from unstash.documents.embedder import Embedder
     from unstash.search.reranker import Reranker
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 @dataclass(slots=True)
@@ -70,12 +70,16 @@ class _Candidate:
     fused_score: float
 
 
+# A document that failed mid-embed can retain committed chunks with
+# non-NULL embeddings (the embed task commits partial progress for
+# idempotent retry), so searchability is gated on document status, not
+# on embedding presence alone.
 _VECTOR_SQL = text(
     """
     SELECT c.id AS chunk_id, c.text, c.document_id, d.title, d.mime_type
     FROM chunks c
     JOIN documents d ON d.id = c.document_id
-    WHERE c.org_id = :org_id AND c.embedding IS NOT NULL
+    WHERE c.org_id = :org_id AND d.status = 'indexed' AND c.embedding IS NOT NULL
     ORDER BY c.embedding <=> CAST(:query_vec AS vector)
     LIMIT :pool
     """,
@@ -87,7 +91,7 @@ _BM25_SQL = text(
            paradedb.score(c.id) AS score
     FROM chunks c
     JOIN documents d ON d.id = c.document_id
-    WHERE c.org_id = :org_id AND c.text @@@ :query
+    WHERE c.org_id = :org_id AND d.status = 'indexed' AND c.text @@@ :query
     ORDER BY score DESC
     LIMIT :pool
     """,
@@ -144,7 +148,7 @@ async def run_search(  # noqa: PLR0913 — pipeline inputs; grouping into an obj
             )
             bm25_rows = with_bm25.mappings().all()
     except DBAPIError:
-        logger.warning("bm25_leg_failed", extra={"query_length": len(query)})
+        logger.warning("bm25_leg_failed", query_length=len(query))
         bm25_used = False
         bm25_rows = []
 
