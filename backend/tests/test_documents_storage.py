@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from fastapi import UploadFile
 
-from unstash.documents.storage import UploadTooLargeError, write_uploaded_file
+from unstash.documents.storage import (
+    UploadTooLargeError,
+    safe_storage_leaf,
+    write_uploaded_file,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -89,6 +93,52 @@ async def test_oversize_upload_raises_and_removes_partial_file(
 
     target = tmp_path / str(ORG_ID) / str(DOCUMENT_ID) / "report.pdf"
     assert not target.exists()
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ("report.pdf", "report.pdf"),
+        ("/etc/cron.d/pwn", "pwn"),
+        ("../../../other/evil.pdf", "evil.pdf"),
+        ("../../..", f"{DOCUMENT_ID}.bin"),
+        ("..", f"{DOCUMENT_ID}.bin"),
+        (".", f"{DOCUMENT_ID}.bin"),
+        ("", f"{DOCUMENT_ID}.bin"),
+        (None, f"{DOCUMENT_ID}.bin"),
+        ("weird...name.txt", "weird...name.txt"),
+    ],
+)
+def test_safe_storage_leaf(filename: str | None, expected: str) -> None:
+    assert safe_storage_leaf(filename, DOCUMENT_ID) == expected
+
+
+@pytest.mark.parametrize(
+    "filename",
+    ["/etc/cron.d/pwn", "../../../victim/x/evil.pdf", "../../escape.txt"],
+)
+async def test_malicious_filename_stays_inside_document_dir(
+    tmp_path: Path,
+    filename: str,
+) -> None:
+    payload = b"hostile"
+    doc_dir = tmp_path / str(ORG_ID) / str(DOCUMENT_ID)
+
+    stored = await write_uploaded_file(
+        upload=_upload(payload, filename=filename),
+        documents_root=tmp_path,
+        org_id=ORG_ID,
+        document_id=DOCUMENT_ID,
+        max_bytes=1024,
+    )
+
+    assert stored.path.parent == doc_dir
+    assert stored.path.resolve().is_relative_to(doc_dir.resolve())
+    assert stored.path.read_bytes() == payload
+    # Nothing was written outside the org's document tree.
+    assert not (tmp_path / "etc").exists()
+    assert not (tmp_path / "victim").exists()
+    assert not (tmp_path / "escape.txt").exists()
 
 
 async def test_missing_filename_falls_back_to_document_id(tmp_path: Path) -> None:
