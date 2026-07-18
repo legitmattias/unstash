@@ -184,6 +184,19 @@ class Settings(BaseSettings):
     mistral_ocr_model: str = Field(default="mistral-ocr-latest")
     mistral_timeout_seconds: float = Field(default=120.0, gt=0)
 
+    # -- NER (named-entity recognition) ----------------------------------------
+    # 'off' disables entity extraction (the default until it is wired into
+    # ingest); 'kb-bert' runs the local Swedish model; 'fake' is the
+    # deterministic test backend. A hosted-endpoint backend slots in here
+    # as another value without touching callers (ADR 0009).
+
+    ner_backend: str = Field(
+        default="off",
+        description="Entity-extraction backend: 'off', 'kb-bert', or 'fake'.",
+    )
+    ner_model: str = Field(default="KBLab/bert-base-swedish-cased-ner")
+    ner_min_score: float = Field(default=0.7, gt=0, le=1)
+
     # -- External APIs ---------------------------------------------------------
     # Added when their respective features are implemented.
 
