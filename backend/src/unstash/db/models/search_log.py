@@ -4,9 +4,10 @@ Append-only analytics. Used to surface popular queries, measure latency
 trends, and (eventually) feed click-through signals into ranking.
 
 No ``updated_at``: rows are immutable once written, with the exception of
-``clicked_document_id``, which is patched in by the click-event ingestion
-path. That update happens via a targeted SQL statement keyed by ``id`` —
-not through the ORM — so no row-level timestamp churn is wanted either.
+the click columns (``clicked_document_id`` and ``clicks``), which the
+click-event path appends to. ``clicks`` records every click with its
+position and timestamp; ``clicked_document_id`` is a convenience
+denormalisation of the latest click.
 
 Foreign keys are ``ON DELETE SET NULL`` for ``user_id`` and both document
 references: a deleted user or document does not erase the search history,
@@ -18,8 +19,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Uuid, func, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from unstash.db.models.base import Base
@@ -53,6 +56,26 @@ class SearchLog(Base):
     language: Mapped[str | None] = mapped_column(String, nullable=True)
     result_count: Mapped[int] = mapped_column(Integer, nullable=False)
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Ordered result set shown to the user: one entry per document with
+    # its rank and scores — the position signal ranking evaluation needs.
+    results: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
+    )
+    # The configuration that produced the results (fusion params,
+    # backends, model identifiers, degrade flags).
+    ranking_config: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+    # Appended click events: {document_id, position, clicked_at}.
+    clicks: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
+    )
     top_document_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("documents.id", ondelete="SET NULL"),

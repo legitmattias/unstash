@@ -2,18 +2,19 @@
 
 ``GET /search`` runs the hybrid pipeline and writes a ``search_logs``
 row inside the same org-scoped transaction as the retrieval queries.
-``POST /search/{search_id}/click`` patches click attribution onto an
-existing log row — the ranking feedback signal.
+``POST /search/{search_id}/click`` appends a click event to that row —
+the ranking feedback signal.
 """
 
 from __future__ import annotations
 
 import time
 import uuid  # noqa: TC003
-from typing import Annotated
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from unstash.config import get_settings
 from unstash.db.models import Document, SearchLog
@@ -28,10 +29,42 @@ from unstash.search.schemas import (
 )
 from unstash.search.service import run_search
 
+if TYPE_CHECKING:
+    from unstash.config import Settings
+    from unstash.search.service import SearchOutcome
+
 search_router = APIRouter()
 
 OrgContextDep = Annotated[OrgContext, Depends(get_org_context)]
 QueryParam = Annotated[str, Query(min_length=1, max_length=1000, alias="q")]
+
+
+def _logged_results(outcome: SearchOutcome) -> list[dict[str, Any]]:
+    """The shown result set as JSON-serialisable rows with rank and scores."""
+    return [
+        {
+            "document_id": str(hit.document_id),
+            "rank": rank,
+            "score": hit.score,
+            "rerank_score": hit.rerank_score,
+        }
+        for rank, hit in enumerate(outcome.hits, start=1)
+    ]
+
+
+def _ranking_config(outcome: SearchOutcome, settings: Settings) -> dict[str, Any]:
+    """The configuration that produced the results, for click attribution."""
+    return {
+        "reranked": outcome.reranked,
+        "bm25_used": outcome.bm25_used,
+        "rrf_k": settings.search_rrf_k,
+        "vector_weight": settings.search_vector_weight,
+        "candidate_pool": settings.search_candidate_pool,
+        "embedder_backend": settings.embedder_backend,
+        "embedder_model": settings.jina_embedding_model,
+        "reranker_backend": settings.reranker_backend,
+        "reranker_model": settings.jina_rerank_model,
+    }
 
 
 @search_router.get("/orgs/{slug}/search", response_model=SearchResponse)
@@ -70,6 +103,8 @@ async def search(
         result_count=len(outcome.hits),
         latency_ms=latency_ms,
         top_document_id=outcome.hits[0].document_id if outcome.hits else None,
+        results=_logged_results(outcome),
+        ranking_config=_ranking_config(outcome, settings),
     )
     ctx.session.add(log_row)
     await ctx.session.flush()
@@ -105,7 +140,12 @@ async def report_click(
     search_id: uuid.UUID,
     body: ClickReport,
 ) -> ClickResponse:
-    """Record which document the user opened from a search result."""
+    """Append a click event to a search log row.
+
+    Records the clicked document, its position in the shown results (if
+    present), and a timestamp. Multiple clicks on one search accumulate;
+    ``clicked_document_id`` tracks the latest.
+    """
     document_exists = await ctx.session.scalar(
         select(Document.id).where(
             Document.id == body.document_id,
@@ -118,15 +158,25 @@ async def report_click(
             detail="Document not found.",
         )
 
-    updated = await ctx.session.scalar(
-        update(SearchLog)
-        .where(SearchLog.id == search_id, SearchLog.org_id == ctx.org_id)
-        .values(clicked_document_id=body.document_id)
-        .returning(SearchLog.id),
-    )
-    if updated is None:
+    log_row = await ctx.session.get(SearchLog, search_id)
+    if log_row is None or log_row.org_id != ctx.org_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Search not found.",
         )
+
+    position = next(
+        (row["rank"] for row in log_row.results if row.get("document_id") == str(body.document_id)),
+        None,
+    )
+    # Reassign rather than mutate in place so SQLAlchemy flushes the JSONB.
+    log_row.clicks = [
+        *log_row.clicks,
+        {
+            "document_id": str(body.document_id),
+            "position": position,
+            "clicked_at": datetime.now(UTC).isoformat(),
+        },
+    ]
+    log_row.clicked_document_id = body.document_id
     return ClickResponse(search_id=search_id, clicked_document_id=body.document_id)

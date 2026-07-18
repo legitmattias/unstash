@@ -9,6 +9,7 @@ and click attribution must never cross tenants.
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import TYPE_CHECKING
 
@@ -212,6 +213,14 @@ async def test_search_finds_seeded_document(
     assert log["result_count"] == body["result_count"]
     assert log["top_document_id"] == roof_doc
 
+    results = json.loads(log["results"])
+    assert [r["rank"] for r in results] == list(range(1, len(results) + 1))
+    assert results[0]["document_id"] == str(roof_doc)
+    config = json.loads(log["ranking_config"])
+    assert config["reranked"] is True
+    assert config["bm25_used"] is True
+    assert config["rrf_k"] == get_settings().search_rrf_k
+
 
 async def test_search_empty_result_shape(
     app_client: AsyncClient,
@@ -287,11 +296,62 @@ async def test_click_reporting_round_trip(
     assert click.status_code == 200, click.text
 
     async with migrations_pool.acquire() as conn:
-        clicked = await conn.fetchval(
-            "SELECT clicked_document_id FROM search_logs WHERE id = $1",
+        row = await conn.fetchrow(
+            "SELECT clicked_document_id, clicks FROM search_logs WHERE id = $1",
             uuid.UUID(search_id),
         )
-    assert clicked == doc
+    assert row["clicked_document_id"] == doc
+    clicks = json.loads(row["clicks"])
+    assert len(clicks) == 1
+    assert clicks[0]["document_id"] == str(doc)
+    assert clicks[0]["position"] == 1
+    assert clicks[0]["clicked_at"]
+
+
+async def test_multiple_clicks_accumulate_without_overwriting(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """A second click is recorded alongside the first, not on top of it."""
+    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    org_a = await _seed_org(migrations_pool, "org-a", "Org A")
+    await _seed_membership(migrations_pool, user_a, org_a)
+    doc_one = await _seed_indexed_document(
+        migrations_pool,
+        org_a,
+        "avtal-el.md",
+        ["Avtal om elleverans till föreningens fastigheter."],
+    )
+    doc_two = await _seed_indexed_document(
+        migrations_pool,
+        org_a,
+        "avtal-varme.md",
+        ["Avtal om fjärrvärme och uppvärmning av fastigheten."],
+    )
+
+    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    search = await app_client.get(
+        "/api/orgs/org-a/search",
+        params={"q": "avtal"},
+    )
+    search_id = search.json()["search_id"]
+
+    for doc in (doc_one, doc_two):
+        click = await app_client.post(
+            f"/api/orgs/org-a/search/{search_id}/click",
+            json={"document_id": str(doc)},
+        )
+        assert click.status_code == 200, click.text
+
+    async with migrations_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT clicked_document_id, clicks FROM search_logs WHERE id = $1",
+            uuid.UUID(search_id),
+        )
+    clicks = json.loads(row["clicks"])
+    assert [c["document_id"] for c in clicks] == [str(doc_one), str(doc_two)]
+    # clicked_document_id tracks the latest.
+    assert row["clicked_document_id"] == doc_two
 
 
 async def test_search_never_returns_other_org_content(
