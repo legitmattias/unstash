@@ -95,6 +95,13 @@ class Settings(BaseSettings):
     redis_host: str = Field(default="redis")
     redis_port: int = Field(default=6379)
 
+    # -- Login rate limiting ---------------------------------------------------
+    # Fixed-window anti-automation on the login endpoint, keyed by client
+    # IP. Backed by Redis; fails open if Redis is unavailable.
+
+    login_rate_limit_max_attempts: int = Field(default=10, gt=0)
+    login_rate_limit_window_seconds: int = Field(default=60, gt=0)
+
     # -- Document ingestion ----------------------------------------------------
     # The on-disk root for uploaded documents. In containers this is
     # bind-mounted from the per-environment data volume; locally it

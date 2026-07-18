@@ -6,11 +6,15 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Annotated
 
 import httpx
+import redis.asyncio as redis
 import structlog
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Awaitable, Callable
+
+    from starlette.responses import Response
 
 from sqlalchemy import text
 
@@ -25,6 +29,7 @@ from unstash.db.models import User
 from unstash.documents.router import documents_router
 from unstash.logging import setup_logging
 from unstash.orgs import orgs_router
+from unstash.ratelimit import client_ip, within_fixed_window
 from unstash.search.router import search_router
 from unstash.startup_checks import (
     check_not_superuser,
@@ -32,6 +37,8 @@ from unstash.startup_checks import (
     check_schema_at_head,
     check_secrets_loadable,
 )
+
+_LOGIN_PATH = "/api/auth/login"
 
 CurrentUser = Annotated[User, Depends(current_user_or_token)]
 
@@ -82,11 +89,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     _app.state.http_client = httpx.AsyncClient(
         limits=httpx.Limits(max_keepalive_connections=10, keepalive_expiry=30.0),
     )
+    # Redis client backing login rate limiting. Absent under ASGI test
+    # transports (lifespan not run), where the middleware then no-ops.
+    _app.state.redis = redis.from_url(settings.redis_url)
 
     try:
         yield
     finally:
         await _app.state.http_client.aclose()
+        await _app.state.redis.aclose()
         await dispose_engine()
         logger.info("stopping")
 
@@ -104,6 +115,45 @@ def create_app() -> FastAPI:
         redoc_url=None,
         openapi_url="/api/openapi.json" if settings.debug else None,
     )
+
+    @app.middleware("http")
+    async def _rate_limit_login(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        """Throttle repeated login attempts per client IP.
+
+        No-op unless the request is a login POST and a Redis client is
+        present (absent under ASGI test transports). A Redis error fails
+        open — a cache outage must not lock users out.
+        """
+        redis_client = getattr(request.app.state, "redis", None)
+        if (
+            request.method == "POST"
+            and request.url.path == _LOGIN_PATH
+            and redis_client is not None
+        ):
+            key = f"ratelimit:login:{client_ip(request)}"
+            try:
+                allowed = await within_fixed_window(
+                    redis_client,
+                    key,
+                    limit=settings.login_rate_limit_max_attempts,
+                    window_seconds=settings.login_rate_limit_window_seconds,
+                )
+            except Exception as exc:
+                # Fail open on any Redis error — a cache outage must not
+                # lock users out of login.
+                logger.warning("login_rate_limit_unavailable", error=str(exc))
+                allowed = True
+            if not allowed:
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": "Too many login attempts. Try again later."},
+                )
+        return await call_next(request)
+
+    _ = _rate_limit_login  # registered by decorator
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
