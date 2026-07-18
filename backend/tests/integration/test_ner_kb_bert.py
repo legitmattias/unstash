@@ -7,13 +7,19 @@ aggregation or our mapping surfaces here rather than in production.
 
 from __future__ import annotations
 
-from unstash.documents.ner import extract_entities
+from unstash.documents.ner import KbBertExtractor
+
+_MIN_SCORE = 0.7
 
 
 def test_kb_bert_extracts_swedish_person_and_location() -> None:
-    entities = extract_entities("Anna Svensson bor i Stockholm.")
+    extractor = KbBertExtractor(
+        model="KBLab/bert-base-swedish-cased-ner",
+        min_score=_MIN_SCORE,
+    )
+    entities = extractor.extract("Anna Svensson bor i Stockholm.")
 
     found = {(e.text, e.label) for e in entities}
     assert ("Anna Svensson", "person") in found
     assert ("Stockholm", "location") in found
-    assert all(e.score >= 0.7 for e in entities)
+    assert all(e.score >= _MIN_SCORE for e in entities)
