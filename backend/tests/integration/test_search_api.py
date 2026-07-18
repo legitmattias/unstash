@@ -76,21 +76,27 @@ async def _seed_indexed_document(
     org_id: uuid.UUID,
     title: str,
     chunk_texts: list[str],
+    status: str = "indexed",
 ) -> uuid.UUID:
-    """Insert an indexed document whose chunks carry fake-embedder vectors."""
+    """Insert a document with embedded chunks, defaulting to ``indexed``.
+
+    ``status`` is overridable so tests can seed a ``failed`` document that
+    still carries embedded chunks (the partial-progress case).
+    """
     embedder = FakeEmbedder(dimensions=get_settings().jina_embedding_dimensions)
     batch = await embedder.embed(chunk_texts, task=EmbeddingTask.PASSAGE)
     async with pool.acquire() as conn:
         document_id = await conn.fetchval(
             "INSERT INTO documents "
             "(org_id, title, source_uri, mime_type, size_bytes, content_hash, status) "
-            "VALUES ($1, $2, $3, $4, $5, $6, 'indexed') RETURNING id",
+            "VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
             org_id,
             title,
             f"/seed/{title}",
             "text/markdown",
             100,
             f"hash-{title}-{org_id}",
+            status,
         )
         for index, (chunk_text, vector) in enumerate(
             zip(chunk_texts, batch.vectors, strict=True),
@@ -225,6 +231,31 @@ async def test_search_empty_result_shape(
     body = response.json()
     assert body["result_count"] == 0
     assert body["results"] == []
+
+
+async def test_failed_document_with_embedded_chunks_is_not_searchable(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """A failed document keeps its committed chunks but must not surface."""
+    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    org_a = await _seed_org(migrations_pool, "org-a", "Org A")
+    await _seed_membership(migrations_pool, user_a, org_a)
+    await _seed_indexed_document(
+        migrations_pool,
+        org_a,
+        "halvklart-protokoll.md",
+        ["Styrelsen beslutade att byta ut porttelefonen i entrén."],
+        status="failed",
+    )
+
+    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    response = await app_client.get(
+        "/api/orgs/org-a/search",
+        params={"q": "porttelefonen i entrén"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["result_count"] == 0
 
 
 async def test_click_reporting_round_trip(
