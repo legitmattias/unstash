@@ -7,10 +7,10 @@ ingest task uses to dispatch the right handler:
   markdown. The default happy path.
 - ``CONVERT_THEN_EXTRACT`` — needs a format conversion before
   Docling. Office formats (DOCX, ODT, RTF, PPT, etc.). The Gotenberg
-  sidecar handles these; introduced in M3-B PR 2.
-- ``METADATA_ONLY`` — recognised but not chunkable in M3. Images,
-  archives. The document row is created; no chunks are generated.
-  A later phase can revisit (image OCR, archive recursion).
+  sidecar handles these.
+- ``METADATA_ONLY`` — recognised but not yet chunkable. Images,
+  archives. The document row is created; no chunks are generated
+  (image OCR and archive recursion are possible future extensions).
 - ``SKIP`` — unsupported or actively suspicious. The upload is
   recorded as failed with an explanation; no parsing attempted.
 
@@ -49,7 +49,7 @@ _EXTRACT_MIMES = frozenset(
 )
 
 # Legacy office formats that need Gotenberg conversion before parsing.
-# Wired in M3-B PR 2; included here so the routing table is exhaustive.
+# Included here so the routing table is exhaustive.
 _CONVERT_MIMES = frozenset(
     {
         "application/msword",  # .doc
@@ -63,7 +63,7 @@ _CONVERT_MIMES = frozenset(
     }
 )
 
-# File types we'll record but won't chunk in M3.
+# File types recorded but not chunked.
 _METADATA_ONLY_PREFIXES = ("image/",)
 _METADATA_ONLY_MIMES = frozenset(
     {

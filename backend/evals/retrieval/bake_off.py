@@ -1,4 +1,4 @@
-"""Embedding-model bake-off (#71): Jina v4 vs Jina v5-text-small vs BGE-M3.
+"""Embedding-model bake-off: Jina v4 vs Jina v5-text-small vs BGE-M3.
 
 One text-only ingest supplies the shared BM25 lane (stemmed index at
 migration head). Each model embeds the same chunks and queries; vector
@@ -6,8 +6,8 @@ ranking is computed in-memory (exact cosine, doc-level best chunk) so
 column width never touches the schema, and fusion uses the adopted
 weighted RRF (k=20, vector:bm25 3:1).
 
-BGE-M3 runs locally in dense mode only (its sparse/ColBERT outputs are a
-separate architectural question, noted in the M4 plan). Run with:
+BGE-M3 runs locally in dense mode only; its sparse/ColBERT outputs are a
+separate architectural question. Run with:
 
     uv run --with sentence-transformers python evals/retrieval/bake_off.py
 """

@@ -1,7 +1,7 @@
 # Base Docker Compose configuration for Unstash.
 # Use with an override file:
 #   Dev:  docker compose -f compose.yaml -f compose.dev.yaml up
-#   Prod: docker compose -f compose.yaml -f compose.prod.yaml up -d
+#   Prod: docker compose -f compose.yaml -f compose.production.yaml up -d
 
 name: unstash
 

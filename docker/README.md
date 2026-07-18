@@ -9,7 +9,7 @@ Container images and Compose configuration for Unstash.
 | `backend.Dockerfile` | FastAPI backend | `builder` → `dev` (hot reload) → `runtime` (production) |
 | `frontend.Dockerfile` | SvelteKit frontend | `builder` → `dev` (hot reload) → `runtime` (production) |
 
-Both use multi-stage builds. Development overrides (`compose.dev.yaml`) target the `dev` stage for source volume mounting and hot reload. Production overrides (`compose.prod.yaml`) target `runtime` with non-root users and health checks.
+Both use multi-stage builds. Development overrides (`compose.dev.yaml`) target the `dev` stage for source volume mounting and hot reload. Production overrides (`compose.production.yaml`) target `runtime` with non-root users and health checks.
 
 ## Supporting files
 
@@ -24,7 +24,8 @@ Compose files live at the repo root:
 |---|---|
 | `compose.yaml` | Base: service definitions, secrets, networks, volumes |
 | `compose.dev.yaml` | Dev overrides: hot reload, exposed ports, debug logging |
-| `compose.prod.yaml` | Prod overrides: resource limits, restart policies |
+| `compose.production.yaml` | Production overrides: resource limits, restart policies |
+| `compose.staging.yaml` | Staging overrides: staging image tags, coexistence ports |
 
 Usage:
 
@@ -33,7 +34,7 @@ Usage:
 docker compose -f compose.yaml -f compose.dev.yaml up --build
 
 # Production
-docker compose -f compose.yaml -f compose.prod.yaml up -d
+docker compose -f compose.yaml -f compose.production.yaml up -d
 ```
 
 Or via Makefile: `make up` / `make down` / `make logs`.

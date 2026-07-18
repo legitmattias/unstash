@@ -3,9 +3,10 @@
 For each embedder (jina-v4, jina-v5-text-small) and each reranker
 (jina-reranker-v2-base-multilingual, jina-reranker-v3), rerank the fused
 top-20 candidates (weighted RRF k=20, 3:1) and measure against the golden
-set. Decides #71 and the reranker choice together: the question is which
-*pair* wins — especially on the decision slice, where v5's retrieval is
-weak but its recall hands the reranker more correct candidates.
+set. Decides the embedder and reranker choice together: the question is
+which *pair* wins — especially on the decision slice, where v5's
+retrieval is weak but its recall hands the reranker more correct
+candidates.
 
 Each candidate document is represented to the reranker by its best chunk
 (by that embedder's cosine), mirroring how the production endpoint will

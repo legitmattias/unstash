@@ -38,9 +38,9 @@ def _password_helper() -> PasswordHelperProtocol:
 class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):  # pyright: ignore[reportInvalidTypeArguments]
     """Application-level user manager.
 
-    Password reset and email verification flows are not wired in this
-    milestone; the secrets below are still required by FastAPI-Users for
-    method signatures and are sourced from ``settings.session_secret``.
+    Password reset and email verification flows are not wired up; the
+    secrets below are still required by FastAPI-Users for method
+    signatures and are sourced from ``settings.session_secret``.
 
     The ``# pyright: ignore`` works around a known FastAPI-Users vs
     SQLAlchemy ORM friction — see ``db/models/user.py``.

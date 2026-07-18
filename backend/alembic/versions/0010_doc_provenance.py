@@ -6,16 +6,15 @@ document's chunks: a free-form ``pipeline_version`` string (e.g.
 ``pipeline_config`` snapshot of the relevant config (chunk size,
 overlap, OCR settings, etc.).
 
-The forward-compatibility rationale (per the AI-engineering
-operational spine note in the planning repo): later milestones may
-need to apply PII redaction retroactively, or rebuild eval golden
-sets, without re-ingesting. Both of those operations need to know
-"which pipeline shape produced these chunks" so they can interpret
-them correctly. Without these columns, anything later that depends
-on per-chunk provenance would force a re-ingestion.
+Forward-compatibility rationale: later work may need to apply PII
+redaction retroactively, or rebuild eval golden sets, without
+re-ingesting. Both operations need to know "which pipeline shape
+produced these chunks" to interpret them correctly. Without these
+columns, anything depending on per-chunk provenance would force a
+re-ingestion.
 
-Both columns are nullable. Existing documents (none yet in
-production at M3-A PR 2) carry NULL until re-ingested.
+Both columns are nullable. Existing documents (none in production at
+the time of this migration) carry NULL until re-ingested.
 
 Revision ID: 0010_doc_provenance
 Revises: 0009_api_tokens

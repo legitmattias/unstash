@@ -47,7 +47,7 @@ Admin routes are gated at the application layer by FastAPI-Users' `current_user(
 
 ### Cross-tenant admin alternatives
 
-Five patterns were surveyed against the practitioner literature (Postgres official docs, Supabase, PostgREST, Bytebase, Crunchy Data, AWS RDS guidance). The investigation is logged in this PR's research artefact and cited below.
+Five patterns were surveyed against the practitioner literature (Postgres official docs, Supabase, PostgREST, Bytebase, Crunchy Data, AWS RDS guidance); sources are cited in References.
 
 - **`SECURITY DEFINER` functions** — every admin operation is a SQL function that runs as the schema owner. Smallest attack surface; auditable through `GRANT EXECUTE`. Rejected for our scale: SQLAlchemy ORM-natural code becomes RPC-style; every new admin op needs a migration; paginated lists with dynamic filters are awkward. Excellent choice when the admin surface is small and frozen — likely not ours.
 - **Bypass GUC in policies** (`SET LOCAL app.bypass_rls = 'true'`, every policy adds `OR coalesce(current_setting('app.bypass_rls', true)::boolean, false)`). Cheap. Documented (Fritzsche, dev.to write-ups). Rejected: the bypass lives in policy text and application discipline rather than in a Postgres role attribute. Any SQL-injection-equivalent bug in the `unstash_app` code path can emit the `SET LOCAL` and bypass RLS. Against our defense-in-depth posture from ADR 0005.
@@ -155,4 +155,3 @@ The `api_tokens` table is intentionally **not** RLS-protected, for the same reas
 - GitLab dev docs: [Authentication](https://docs.gitlab.com/development/authentication/)
 - Slack: [Tokens overview](https://docs.slack.dev/authentication/tokens/)
 - Stripe: [API keys best practices](https://docs.stripe.com/keys-best-practices)
-- Internal: `notes/learning/auth/api-token-storage.md` (the deeper write-up that informed this amendment)

@@ -5,8 +5,7 @@ at migration head), embeds it, runs each retrieval configuration over the
 golden queries, and reports Recall@10, MRR, and nDCG@10 per category.
 
 Configurations: vector-only, bm25-only, rrf (fusion in Python here; the
-production search endpoint implements the same math in SQL). Reranking is
-added as a fourth configuration when the rerank client lands (Phase C).
+production search endpoint implements the same math in SQL).
 
 Judgments are document-level, so chunk hits are reduced to documents by
 best-chunk score before metrics.

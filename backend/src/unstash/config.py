@@ -140,8 +140,8 @@ class Settings(BaseSettings):
     jina_timeout_seconds: float = Field(default=60.0, gt=0)
 
     # -- Search (hybrid retrieval + rerank) -------------------------------------
-    # Fusion defaults come from the measured Phase B experiments on the
-    # golden retrieval set; see backend/evals/retrieval/reports/.
+    # Fusion defaults come from the measured fusion-sweep experiments on
+    # the golden retrieval set; see backend/evals/retrieval/reports/.
 
     reranker_backend: str = Field(
         default="jina",

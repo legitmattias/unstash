@@ -5,9 +5,9 @@ Each row represents an authenticated session. The cookie value is the
 validate the session, which allows server-side invalidation on logout.
 
 Tokens are not org-scoped. They identify a user; the org context is
-established per-request by middleware via the URL slug + org_memberships.
-RLS therefore does not apply to this table — see the M2 Phase B plan's
-treatment of the ``users`` table for the same reasoning.
+established per-request via the URL slug + org_memberships. RLS therefore
+does not apply to this table — the same reasoning as the ``users`` table
+(see migration 0006 and ADR 0006).
 """
 
 from __future__ import annotations

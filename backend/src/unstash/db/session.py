@@ -1,14 +1,12 @@
 """Async session factory and FastAPI dependency.
 
-``get_session`` is the standard way for routes and services to obtain a
-database session. It opens a session-scoped transaction at the start of the
+``get_session`` opens a session-scoped transaction at the start of the
 request and commits at the end (or rolls back on exception).
 
-In M2 Phase D, this dependency will additionally execute
-``SET LOCAL app.current_org_id = <uuid>`` after extracting the org id from the
-URL — putting the row-level security context in place before any query runs.
-That hook is intentionally not present yet; this module sets up the lifecycle
-so adding it is a focused, narrow change.
+Org-scoped routes do not use this dependency directly; they go through
+:func:`unstash.orgs.dependencies.get_org_context`, which sets
+``app.current_org_id`` on the transaction — establishing the row-level
+security context — before any query runs.
 """
 
 from __future__ import annotations
@@ -82,8 +80,8 @@ async def get_session_unmanaged() -> AsyncIterator[AsyncSession]:
     causes ``Can't operate on closed transaction inside context manager``.
 
     Routes that do not need an enclosing transaction (auth) use this
-    dependency. Org-scoped routes that need RLS context will use a
-    transaction-wrapping variant added in M2.5-A PR 3.
+    dependency. Org-scoped routes that need RLS context use the
+    transaction-wrapping :func:`unstash.orgs.dependencies.get_org_context`.
     """
     sessionmaker = get_sessionmaker()
     async with sessionmaker() as session:

@@ -1,7 +1,7 @@
 # Evaluation assets
 
 Golden datasets and runners for measuring retrieval (and later classification)
-quality. See the retrieval evaluation design in the M4 milestone plan.
+quality.
 
 **Data governance:** everything under this tree is **fully synthetic** — a
 fictional housing cooperative with invented people, companies, amounts, and

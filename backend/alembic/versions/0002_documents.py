@@ -158,7 +158,7 @@ def upgrade() -> None:
     #
     # pgvectorscale StreamingDiskANN, cosine distance. The full 2048-dim vector
     # is indexed; a leading subset can be indexed later via WITH
-    # (num_dimensions = N) if the M3 re-evaluation favours a smaller index.
+    # (num_dimensions = N) if a future evaluation favours a smaller index.
     op.execute(
         "CREATE INDEX ix_chunks_embedding_diskann "
         "ON chunks USING diskann (embedding vector_cosine_ops)"

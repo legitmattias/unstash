@@ -1,6 +1,6 @@
 """Worker-side org context manager.
 
-The HTTP path has :func:`unstash.orgs.router.get_org_scoped_session`,
+The HTTP path has :func:`unstash.orgs.dependencies.get_org_context`,
 which opens a transaction and sets ``app.current_org_id`` so RLS
 policies scope queries to the request's tenant. Workers need the same
 thing but the entry point is a Taskiq job kwarg, not a URL slug.
@@ -10,8 +10,6 @@ that opens a session, starts a transaction, runs
 ``set_config('app.current_org_id', :org_id, true)``, and yields the
 session for the job body to use. Commits on clean exit, rolls back on
 exception, closes either way.
-
-Closes issue #38 (M2 Phase D3 — worker-side org context).
 """
 
 from __future__ import annotations

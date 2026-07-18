@@ -4,6 +4,8 @@
 
 Accepted. Supersedes the **Frontend** section of ADR 0001.
 
+Amended 2026-07-18: Context, Alternatives, and Consequences edited to use role-based generic terms. The decision and its rationale are unchanged.
+
 ## Context
 
 ADR 0001 chose SvelteKit + Open Props + Svelte scoped styles + Bits UI + Iconify + pnpm for the frontend. At the time, the rationale was framework familiarity and a small, ergonomic stack appropriate for a single operator-developer.
@@ -12,7 +14,7 @@ Two facts have changed the relevant trade-off:
 
 1. **No frontend code beyond a landing stub exists yet.** M4 is the first milestone that builds substantive UI (search interface and results). M5–M8 follow. The marginal cost of switching the framework now is near zero; the marginal cost of switching after M4–M8 ship is high (rewriting components, re-doing styling, re-doing routing).
 
-2. **The product doubles as a portfolio piece.** Unstash is the operator's flagship public-facing example of production AI engineering plus full-stack delivery. For that role, the frontend stack's ubiquity in the target market matters. The Stockholm / EU hiring market is dominated by React + Next.js: hiring listings routinely specify "React (Next.js)" by name, React appears in ~50–60% of frontend job postings, and SvelteKit demand is roughly an order of magnitude thinner. The operator already has SvelteKit proficiency (Curios, Traiceless); the React + Next.js learning is a deliberate skill investment the project provides a believed-in home for.
+2. **The product doubles as a portfolio piece.** Unstash serves as a public-facing example of production AI engineering plus full-stack delivery. For that role, the frontend stack's ubiquity in the target hiring market matters. That market is dominated by React + Next.js: hiring listings routinely specify "React (Next.js)" by name, React appears in ~50–60% of frontend job postings, and SvelteKit demand is roughly an order of magnitude thinner. The developer already has SvelteKit proficiency from prior projects; the React + Next.js learning is a deliberate skill investment the project provides a home for.
 
 The decision affects only the frontend. The backend (FastAPI), database (Postgres + pgvector + pgvectorscale), search infrastructure, document ingestion, ML tooling, deployment topology, and operational posture from ADR 0001 are unchanged.
 
@@ -29,8 +31,8 @@ The decision affects only the frontend. The backend (FastAPI), database (Postgre
 
 - **Radix UI primitives** for headless, accessible components (dialogs, dropdowns, comboboxes, popovers, etc.). The React analogue of Bits UI from the prior stack.
 - **CSS Modules** for component-level styles. First-class in Next.js, clean in Server Components, no runtime CSS-in-JS overhead, no RSC-boundary friction.
-- **Open Props + CSS custom properties** for design tokens. Carries over from the operator's existing SvelteKit work and matches the styling approach used in Dossier (another personal project on Remix). Same tokens, different framework.
-- **No Tailwind.** Tailwind's aesthetics are not a fit for the operator's design preference. The CSS layer is also a secondary signal for hiring (employers screen on App Router / RSC / Server Actions much more than on the styling approach). Vanilla Extract and Panda CSS were considered and rejected as unnecessary complexity for this goal.
+- **Open Props + CSS custom properties** for design tokens. Carries over from prior SvelteKit work and matches the styling approach used in another prior project (on Remix). Same tokens, different framework.
+- **No Tailwind.** Tailwind's aesthetics are not a fit for this project's design preference. The CSS layer is also a secondary signal for hiring (employers screen on App Router / RSC / Server Actions much more than on the styling approach). Vanilla Extract and Panda CSS were considered and rejected as unnecessary complexity for this goal.
 - **pnpm** stays as the package manager. Framework-agnostic.
 - **Iconify** stays — it has first-party React bindings.
 
@@ -51,7 +53,7 @@ The `HttpOnly unstash_session` cookie model from ADR 0006 is preserved. FastAPI 
 
 ### Keep SvelteKit (status quo)
 
-The fastest delivery option. The operator is already proficient with SvelteKit and uses it in other personal projects (Curios, Traiceless). Cohesion across the operator's portfolio would be slightly higher with a unified Svelte stack.
+The fastest delivery option. The operator is already proficient with SvelteKit and uses it in other prior projects. Cohesion across those projects would be slightly higher with a unified Svelte stack.
 
 Rejected because:
 - The portfolio purpose of Unstash dominates here. SvelteKit is the weakest hiring signal of the three serious options for the target market.
@@ -60,7 +62,7 @@ Rejected because:
 
 ### Remix / React Router v7 (framework mode)
 
-The closest conceptual on-ramp from SvelteKit — loaders and actions in React Router v7 map almost directly onto SvelteKit's load functions and form actions. The operator's existing Dossier project uses Remix and could share patterns.
+The closest conceptual on-ramp from SvelteKit — loaders and actions in React Router v7 map almost directly onto SvelteKit's load functions and form actions. A prior project uses Remix and could share patterns.
 
 Rejected because:
 - "Next.js" is the name the market recognises. React Router v7-as-framework and "Remix 3" (Preact fork, no stable release as of mid-2026) are weaker hiring signals.
@@ -99,7 +101,7 @@ Rejected: hard constraint. Violates the EU-hosting / GDPR posture (ADR 0001) and
 ### Negative
 
 - **Slower initial frontend velocity than SvelteKit** would have been. The operator has to climb the App Router + RSC mental model, learn the caching / revalidation rules, and internalise the server / client component boundary. This is partly the point (learning value), but it does slow M4 throughput.
-- **Polyglot frontend across the operator's portfolio.** Curios and Traiceless are Svelte; Dossier is Remix; Unstash will be Next.js. Context-switching cost between projects is real. Partly the point (broader exposure), but a cost.
+- **Polyglot frontend across the developer's projects.** Prior projects use Svelte and Remix; Unstash will be Next.js. Context-switching cost between projects is real. Partly the point (broader exposure), but a cost.
 - **Discards the Open Props + Bits UI choices from ADR 0001.** Nothing was built on them, so the discard cost is conceptual only — but the design-system choices have to be re-made for the React ecosystem.
 - **App Router caching and the server / client boundary have a steeper mental model** than SvelteKit's load / form actions. More footguns: revalidation timing, cookie forwarding from Server Components, dynamic vs static rendering choices, the `'use client'` boundary. This is also a learning benefit but it has a real per-week ergonomic tax.
 - **Self-hosting `output: 'standalone'`** is slightly more involved than SvelteKit's `adapter-node`. Both fit the existing Docker + Caddy topology; the Next.js path has a few more moving pieces in the standalone build output. Manageable, not free.

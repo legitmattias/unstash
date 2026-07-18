@@ -1,4 +1,4 @@
-"""Adversarial auth tests — the cross-layer probes that close M2.5-C.
+"""Adversarial auth tests — cross-layer probes over auth, org context, and RLS.
 
 The existing test files cover their specific surfaces in isolation:
 
