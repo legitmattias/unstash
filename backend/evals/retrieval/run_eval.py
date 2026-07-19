@@ -30,8 +30,8 @@ HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parents[1] / "src"))
 
-import asyncpg  # noqa: E402
-from metrics import mrr, ndcg_at_k, recall_at_k  # noqa: E402
+import asyncpg
+from metrics import mrr, ndcg_at_k, recall_at_k
 
 # Adopted production fusion settings (mirror config.py search_rrf_k /
 # search_vector_weight) so a re-run's ``rrf`` config is comparable to
@@ -141,9 +141,9 @@ def rank_rrf(
 
 async def sweep_fusion(embedder_kind: str, report_path: str | None) -> None:
     """Grid-search RRF k and vector:bm25 weighting over one retrieval pass."""
-    from eval_db import fresh_database  # noqa: PLC0415
+    from eval_db import fresh_database
 
-    from unstash.documents.embedder import EmbeddingTask  # noqa: PLC0415
+    from unstash.documents.embedder import EmbeddingTask
 
     golden = [q for q in load_golden() if q["category"] != "no_answer"]
     embedder = build_embedder(embedder_kind)
@@ -204,7 +204,7 @@ SWEDISH_BM25_INDEX = (
 
 
 async def run(embedder_kind: str, report_path: str | None, bm25_tokenizer: str = "icu") -> None:
-    from eval_db import fresh_database  # noqa: PLC0415
+    from eval_db import fresh_database
 
     from unstash.documents.embedder import EmbeddingTask
 
