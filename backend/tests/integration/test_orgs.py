@@ -12,8 +12,11 @@ from tests.integration.conftest import (
     TEST_ADMIN_PASSWORD,
     TEST_APP_PASSWORD,
     TEST_MIGRATIONS_PASSWORD,
+    login,
+    seed_membership,
+    seed_org,
+    seed_user,
 )
-from unstash.auth.manager import _password_helper
 from unstash.config import get_settings
 from unstash.db.engine import dispose_engine, get_admin_engine, get_engine
 from unstash.db.session import get_admin_sessionmaker, get_sessionmaker
@@ -29,54 +32,19 @@ USER_PASSWORD = uuid.uuid4().hex + "Aa1"
 USER_A_EMAIL = "user-a@example.com"
 
 
-async def _seed_user(pool: asyncpg.Pool, email: str, password: str) -> uuid.UUID:
-    hashed = _password_helper().hash(password)
-    async with pool.acquire() as conn:
-        return await conn.fetchval(
-            "INSERT INTO users (email, hashed_password, is_active, is_verified) "
-            "VALUES ($1, $2, true, true) RETURNING id",
-            email,
-            hashed,
-        )
-
-
-async def _seed_org(pool: asyncpg.Pool, slug: str, name: str) -> uuid.UUID:
-    async with pool.acquire() as conn:
-        return await conn.fetchval(
-            "INSERT INTO organisations (slug, name) VALUES ($1, $2) RETURNING id",
-            slug,
-            name,
-        )
-
-
-async def _seed_membership(
-    pool: asyncpg.Pool,
-    user_id: uuid.UUID,
-    org_id: uuid.UUID,
-    role: str,
-) -> None:
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO org_memberships (user_id, org_id, role) VALUES ($1, $2, $3)",
-            user_id,
-            org_id,
-            role,
-        )
-
-
 @pytest.fixture
 async def acme_id(migrations_pool: asyncpg.Pool) -> uuid.UUID:
-    return await _seed_org(migrations_pool, "acme", "Acme")
+    return await seed_org(migrations_pool, "acme", "Acme")
 
 
 @pytest.fixture
 async def beta_id(migrations_pool: asyncpg.Pool) -> uuid.UUID:
-    return await _seed_org(migrations_pool, "beta", "Beta")
+    return await seed_org(migrations_pool, "beta", "Beta")
 
 
 @pytest.fixture
 async def user_a_id(migrations_pool: asyncpg.Pool) -> uuid.UUID:
-    return await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    return await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
 
 
 @pytest.fixture
@@ -86,7 +54,7 @@ async def user_a_in_acme(
     acme_id: uuid.UUID,
 ) -> uuid.UUID:
     """User A is a member of Acme. Beta is intentionally not joined."""
-    await _seed_membership(migrations_pool, user_a_id, acme_id, "member")
+    await seed_membership(migrations_pool, user_a_id, acme_id, "member")
     return user_a_id
 
 
@@ -124,14 +92,6 @@ async def app_client(
         await dispose_engine()
 
 
-async def _login(client: AsyncClient, email: str, password: str) -> None:
-    response = await client.post(
-        "/api/auth/login",
-        data={"username": email, "password": password},
-    )
-    assert response.status_code == 204, response.text
-
-
 async def test_unauthenticated_org_route_returns_401(
     app_client: AsyncClient,
     acme_id: uuid.UUID,
@@ -148,7 +108,7 @@ async def test_unknown_slug_returns_404(
 ) -> None:
     """Authenticated caller against a non-existent slug gets 404, not 403."""
     _ = user_a_in_acme
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
     response = await app_client.get("/api/orgs/no-such-org/me")
     assert response.status_code == 404
 
@@ -160,7 +120,7 @@ async def test_non_member_returns_403(
 ) -> None:
     """User in Acme attempting to access Beta gets 403."""
     _ = user_a_in_acme, beta_id
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
     response = await app_client.get("/api/orgs/beta/me")
     assert response.status_code == 403
 
@@ -171,7 +131,7 @@ async def test_member_gets_own_membership(
     acme_id: uuid.UUID,
 ) -> None:
     """Member of Acme reads their own membership through the org-scoped session."""
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
     response = await app_client.get("/api/orgs/acme/me")
     assert response.status_code == 200, response.text
     body = response.json()
@@ -200,14 +160,14 @@ async def test_rls_blocks_cross_org_visibility(
     # technically can't be in two orgs in this test because we're
     # asserting Acme's /me returns ONE row — that row must be the Acme
     # one.  Add Beta as a separate user so the cross-org noise is real.
-    other_user = await _seed_user(
+    other_user = await seed_user(
         migrations_pool,
         "user-b@example.com",
         USER_PASSWORD,
     )
-    await _seed_membership(migrations_pool, other_user, beta_id, "admin")
+    await seed_membership(migrations_pool, other_user, beta_id, "admin")
 
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
     response = await app_client.get("/api/orgs/acme/me")
     assert response.status_code == 200
     body = response.json()

@@ -24,8 +24,11 @@ from tests.integration.conftest import (
     TEST_ADMIN_PASSWORD,
     TEST_APP_PASSWORD,
     TEST_MIGRATIONS_PASSWORD,
+    login,
+    seed_membership,
+    seed_org,
+    seed_user,
 )
-from unstash.auth.manager import _password_helper
 from unstash.config import get_settings
 from unstash.db.engine import dispose_engine, get_admin_engine, get_engine
 from unstash.db.session import get_admin_sessionmaker, get_sessionmaker
@@ -41,41 +44,6 @@ if TYPE_CHECKING:
 USER_PASSWORD = uuid.uuid4().hex + "Aa1"
 USER_A_EMAIL = "alice@example.com"
 USER_B_EMAIL = "bob@example.com"
-
-
-async def _seed_user(pool: asyncpg.Pool, email: str, password: str) -> uuid.UUID:
-    hashed = _password_helper().hash(password)
-    async with pool.acquire() as conn:
-        return await conn.fetchval(
-            "INSERT INTO users (email, hashed_password, is_active, is_verified) "
-            "VALUES ($1, $2, true, true) RETURNING id",
-            email,
-            hashed,
-        )
-
-
-async def _seed_org(pool: asyncpg.Pool, slug: str, name: str) -> uuid.UUID:
-    async with pool.acquire() as conn:
-        return await conn.fetchval(
-            "INSERT INTO organisations (slug, name) VALUES ($1, $2) RETURNING id",
-            slug,
-            name,
-        )
-
-
-async def _seed_membership(
-    pool: asyncpg.Pool,
-    user_id: uuid.UUID,
-    org_id: uuid.UUID,
-    role: str = "member",
-) -> None:
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO org_memberships (user_id, org_id, role) VALUES ($1, $2, $3)",
-            user_id,
-            org_id,
-            role,
-        )
 
 
 @pytest.fixture
@@ -128,24 +96,16 @@ async def app_client(
         await dispose_engine()
 
 
-async def _login(client: AsyncClient, email: str, password: str) -> None:
-    response = await client.post(
-        "/api/auth/login",
-        data={"username": email, "password": password},
-    )
-    assert response.status_code == 204, response.text
-
-
 async def test_upload_round_trip(
     app_client: AsyncClient,
     migrations_pool: asyncpg.Pool,
 ) -> None:
     """Small file uploads, runs parse + embed, and lands indexed in monitoring."""
-    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
-    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
-    await _seed_membership(migrations_pool, user_a, acme_id)
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id)
 
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
 
     payload = b"hello world, this is a tiny test document\n"
     files = {"file": ("hello.txt", payload, "text/plain")}
@@ -178,11 +138,11 @@ async def test_upload_writes_file_with_correct_hash(
     tmp_path: Path,
 ) -> None:
     """The file lands on disk under {root}/{org_id}/{document_id}/ with the right SHA-256."""
-    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
-    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
-    await _seed_membership(migrations_pool, user_a, acme_id)
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id)
 
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
 
     payload = b"some bytes for verification"
     files = {"file": ("verify.txt", payload, "text/plain")}
@@ -225,11 +185,11 @@ async def test_list_documents_paginates(
     migrations_pool: asyncpg.Pool,
 ) -> None:
     """``GET /documents`` returns newest first with limit/offset semantics."""
-    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
-    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
-    await _seed_membership(migrations_pool, user_a, acme_id)
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id)
 
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
 
     for i in range(3):
         files = {"file": (f"doc-{i}.txt", f"doc {i}".encode(), "text/plain")}
@@ -258,14 +218,14 @@ async def test_oversized_upload_returns_413(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An upload exceeding ``max_upload_bytes`` is rejected with 413."""
-    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
-    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
-    await _seed_membership(migrations_pool, user_a, acme_id)
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id)
 
     monkeypatch.setenv("UNSTASH_MAX_UPLOAD_BYTES", "8")
     get_settings.cache_clear()
 
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
     files = {"file": ("oversized.txt", b"this is too long", "text/plain")}
     response = await app_client.post("/api/orgs/acme/documents", files=files)
     assert response.status_code == 413
@@ -276,14 +236,14 @@ async def test_cross_org_isolation_on_documents_routes(
     migrations_pool: asyncpg.Pool,
 ) -> None:
     """User B in Beta cannot see User A's Acme document by id or listing."""
-    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
-    user_b = await _seed_user(migrations_pool, USER_B_EMAIL, USER_PASSWORD)
-    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
-    beta_id = await _seed_org(migrations_pool, "beta", "Beta")
-    await _seed_membership(migrations_pool, user_a, acme_id)
-    await _seed_membership(migrations_pool, user_b, beta_id)
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    user_b = await seed_user(migrations_pool, USER_B_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    beta_id = await seed_org(migrations_pool, "beta", "Beta")
+    await seed_membership(migrations_pool, user_a, acme_id)
+    await seed_membership(migrations_pool, user_b, beta_id)
 
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
     files = {"file": ("acme-doc.txt", b"acme-only", "text/plain")}
     response = await app_client.post("/api/orgs/acme/documents", files=files)
     assert response.status_code == 201
@@ -291,7 +251,7 @@ async def test_cross_org_isolation_on_documents_routes(
 
     await app_client.post("/api/auth/logout")
     app_client.cookies.clear()
-    await _login(app_client, USER_B_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_B_EMAIL, USER_PASSWORD)
 
     # User B is in Beta, not Acme: listing Acme is 403.
     cross_listing = await app_client.get("/api/orgs/acme/documents")
@@ -315,10 +275,10 @@ async def test_duplicate_upload_returns_existing_document(
     migrations_pool: asyncpg.Pool,
 ) -> None:
     """The same bytes uploaded twice in one org dedupe to the first document."""
-    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
-    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
-    await _seed_membership(migrations_pool, user_a, acme_id)
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
 
     payload = b"identical bytes uploaded twice\n"
     files = {"file": ("original.txt", payload, "text/plain")}
@@ -350,16 +310,16 @@ async def test_same_content_in_different_orgs_is_not_deduped(
     migrations_pool: asyncpg.Pool,
 ) -> None:
     """Dedup is per-org: identical bytes in two orgs ingest independently."""
-    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
-    user_b = await _seed_user(migrations_pool, USER_B_EMAIL, USER_PASSWORD)
-    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
-    beta_id = await _seed_org(migrations_pool, "beta", "Beta")
-    await _seed_membership(migrations_pool, user_a, acme_id)
-    await _seed_membership(migrations_pool, user_b, beta_id)
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    user_b = await seed_user(migrations_pool, USER_B_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    beta_id = await seed_org(migrations_pool, "beta", "Beta")
+    await seed_membership(migrations_pool, user_a, acme_id)
+    await seed_membership(migrations_pool, user_b, beta_id)
 
     payload = b"shared bytes across orgs\n"
 
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
     first = await app_client.post(
         "/api/orgs/acme/documents",
         files={"file": ("doc.txt", payload, "text/plain")},
@@ -368,7 +328,7 @@ async def test_same_content_in_different_orgs_is_not_deduped(
 
     await app_client.post("/api/auth/logout")
     app_client.cookies.clear()
-    await _login(app_client, USER_B_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_B_EMAIL, USER_PASSWORD)
     second = await app_client.post(
         "/api/orgs/beta/documents",
         files={"file": ("doc.txt", payload, "text/plain")},
@@ -379,7 +339,7 @@ async def test_same_content_in_different_orgs_is_not_deduped(
     await _wait_terminal(app_client, "beta", second.json()["document_id"])
     await app_client.post("/api/auth/logout")
     app_client.cookies.clear()
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
     await _wait_terminal(app_client, "acme", first.json()["document_id"])
 
 
@@ -388,10 +348,10 @@ async def test_failed_document_does_not_block_reupload(
     migrations_pool: asyncpg.Pool,
 ) -> None:
     """Re-uploading bytes whose previous ingestion failed starts a new attempt."""
-    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
-    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
-    await _seed_membership(migrations_pool, user_a, acme_id)
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
 
     # ELF magic bytes route to SKIP and the document lands in failed.
     payload = b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 64
@@ -430,15 +390,15 @@ async def test_daily_upload_limit_enforced(
     Duplicates do not consume quota (no row is created), and an org
     with a NULL limit is unaffected (every other test exercises that).
     """
-    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
-    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
-    await _seed_membership(migrations_pool, user_a, acme_id)
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id)
     async with migrations_pool.acquire() as conn:
         await conn.execute(
             "UPDATE organisations SET daily_upload_limit = 2 WHERE id = $1",
             acme_id,
         )
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
 
     first = await app_client.post(
         "/api/orgs/acme/documents",

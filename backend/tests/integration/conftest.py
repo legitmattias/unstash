@@ -28,10 +28,14 @@ from alembic import command
 from alembic.config import Config
 from testcontainers.postgres import PostgresContainer
 
+from unstash.auth.manager import _password_helper
 from unstash.config import get_settings
 
 if TYPE_CHECKING:
+    import uuid
     from collections.abc import AsyncIterator, Iterator
+
+    from httpx import AsyncClient
 
 
 # Generated once per test process; no literal for secret scanners to match.
@@ -193,3 +197,62 @@ async def migrations_pool(
         yield pool
     finally:
         await pool.close()
+
+
+# --- Shared seed + login helpers ---------------------------------------------
+# Used across the integration suite so the same insert and login logic lives
+# in one place; a schema or auth change updates a single definition.
+
+
+async def seed_user(
+    pool: asyncpg.Pool,
+    email: str,
+    password: str,
+    *,
+    is_superuser: bool = False,
+) -> uuid.UUID:
+    """Insert an active, verified user with a known password; return its id."""
+    hashed = _password_helper().hash(password)
+    async with pool.acquire() as conn:
+        return await conn.fetchval(
+            "INSERT INTO users (email, hashed_password, is_active, is_verified, is_superuser) "
+            "VALUES ($1, $2, true, true, $3) RETURNING id",
+            email,
+            hashed,
+            is_superuser,
+        )
+
+
+async def seed_org(pool: asyncpg.Pool, slug: str, name: str) -> uuid.UUID:
+    """Insert an organisation; return its id."""
+    async with pool.acquire() as conn:
+        return await conn.fetchval(
+            "INSERT INTO organisations (slug, name) VALUES ($1, $2) RETURNING id",
+            slug,
+            name,
+        )
+
+
+async def seed_membership(
+    pool: asyncpg.Pool,
+    user_id: uuid.UUID,
+    org_id: uuid.UUID,
+    role: str = "member",
+) -> None:
+    """Add a user to an organisation with the given role."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO org_memberships (user_id, org_id, role) VALUES ($1, $2, $3)",
+            user_id,
+            org_id,
+            role,
+        )
+
+
+async def login(client: AsyncClient, email: str, password: str) -> None:
+    """Log in via the cookie auth endpoint; assert the session is established."""
+    response = await client.post(
+        "/api/auth/login",
+        data={"username": email, "password": password},
+    )
+    assert response.status_code == 204, response.text
