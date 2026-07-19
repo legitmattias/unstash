@@ -69,6 +69,35 @@ _EMBED_BATCH_SIZE = 32
 _TARGET_RETRY_DELAYS = (0.05, 0.1, 0.2, 0.4, 0.8, 1.6)
 
 
+async def _fail_job(  # noqa: PLR0913 — the failure transition needs all of these; bundling buys nothing
+    session: AsyncSession,
+    document: Document,
+    job: JobProgress,
+    exc: Exception,
+    started: datetime,
+    *,
+    event: str,
+    extra: dict[str, object] | None = None,
+) -> None:
+    """Transition a document and its job to the failed state, and log it."""
+    finished = datetime.now(UTC)
+    logger.info(
+        event,
+        org_id=str(document.org_id),
+        document_id=str(document.id),
+        exc_type=type(exc).__name__,
+        exc_msg=str(exc),
+        duration_ms=round((finished - started).total_seconds() * 1000),
+        **(extra or {}),
+    )
+    document.status = DocumentStatus.FAILED
+    document.parsing_error = f"{type(exc).__name__}: {exc}"
+    job.status = JobStatus.FAILED
+    job.error = document.parsing_error
+    job.finished_at = finished
+    await session.flush()
+
+
 async def _load_targets(
     session: AsyncSession,
     document_id: uuid.UUID,
@@ -136,22 +165,15 @@ async def ingest_document(
         try:
             await _run_parse(session, document, file_path)
         except Exception as exc:
-            finished = datetime.now(UTC)
-            logger.info(
-                "ingest_document_failed",
-                org_id=str(org_id),
-                document_id=str(document_id),
-                exc_type=type(exc).__name__,
-                exc_msg=str(exc),
-                duration_ms=round((finished - started).total_seconds() * 1000),
-                peak_rss_mib=round(peak_rss_mib(), 1),
+            await _fail_job(
+                session,
+                document,
+                job,
+                exc,
+                started,
+                event="ingest_document_failed",
+                extra={"peak_rss_mib": round(peak_rss_mib(), 1)},
             )
-            document.status = DocumentStatus.FAILED
-            document.parsing_error = f"{type(exc).__name__}: {exc}"
-            job.status = JobStatus.FAILED
-            job.error = document.parsing_error
-            job.finished_at = finished
-            await session.flush()
             return
 
         document.status = DocumentStatus.PARSED
@@ -228,21 +250,14 @@ async def embed_document(
                     chunk.embedding = vector
                 total_tokens += embedded.total_tokens
         except Exception as exc:
-            finished = datetime.now(UTC)
-            logger.info(
-                "embed_document_failed",
-                org_id=str(org_id),
-                document_id=str(document_id),
-                exc_type=type(exc).__name__,
-                exc_msg=str(exc),
-                duration_ms=round((finished - started).total_seconds() * 1000),
+            await _fail_job(
+                session,
+                document,
+                job,
+                exc,
+                started,
+                event="embed_document_failed",
             )
-            document.status = DocumentStatus.FAILED
-            document.parsing_error = f"{type(exc).__name__}: {exc}"
-            job.status = JobStatus.FAILED
-            job.error = document.parsing_error
-            job.finished_at = finished
-            await session.flush()
             return
 
         finished = datetime.now(UTC)
