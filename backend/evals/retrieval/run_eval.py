@@ -33,7 +33,11 @@ sys.path.insert(0, str(HERE.parents[1] / "src"))
 import asyncpg  # noqa: E402
 from metrics import mrr, ndcg_at_k, recall_at_k  # noqa: E402
 
-RRF_K = 60
+# Adopted production fusion settings (mirror config.py search_rrf_k /
+# search_vector_weight) so a re-run's ``rrf`` config is comparable to
+# what the search endpoint serves.
+RRF_K = 20
+VECTOR_WEIGHT = 3.0
 TOP_N = 50
 
 
@@ -125,7 +129,7 @@ def rank_rrf(
     vector_ranked: list[str],
     bm25_ranked: list[str],
     k: int = RRF_K,
-    vector_weight: float = 1.0,
+    vector_weight: float = VECTOR_WEIGHT,
     bm25_weight: float = 1.0,
 ) -> list[str]:
     scores: dict[str, float] = defaultdict(float)

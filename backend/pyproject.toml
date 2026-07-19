@@ -139,6 +139,7 @@ ignore = [
 "src/unstash/orgs/dependencies.py" = ["TC003"]
 "src/unstash/auth/dependencies.py" = ["TC002"]
 "src/unstash/documents/router.py" = ["TC001", "TC003"]
+"src/unstash/search/router.py" = ["TC001"]
 "src/unstash/documents/schemas.py" = ["TC001", "TC003"]
 
 [tool.ruff.lint.pydocstyle]

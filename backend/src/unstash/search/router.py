@@ -13,13 +13,13 @@ import uuid  # noqa: TC003
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from sqlalchemy import select
 
 from unstash.config import get_settings
 from unstash.db.models import Document, SearchLog
 from unstash.documents.embedder import EmbeddingError, get_embedder
-from unstash.orgs.dependencies import CurrentUserDep, OrgContext, get_org_context
+from unstash.orgs.dependencies import CurrentUserDep, OrgContextDep
 from unstash.search.reranker import get_reranker
 from unstash.search.schemas import (
     ClickReport,
@@ -35,7 +35,6 @@ if TYPE_CHECKING:
 
 search_router = APIRouter()
 
-OrgContextDep = Annotated[OrgContext, Depends(get_org_context)]
 QueryParam = Annotated[str, Query(min_length=1, max_length=1000, alias="q")]
 
 
