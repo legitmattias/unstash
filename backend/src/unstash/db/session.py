@@ -1,12 +1,11 @@
-"""Async session factory and FastAPI dependency.
+"""Async session factories and FastAPI dependencies.
 
-``get_session`` opens a session-scoped transaction at the start of the
-request and commits at the end (or rolls back on exception).
-
-Org-scoped routes do not use this dependency directly; they go through
+Org-scoped routes obtain a session through
 :func:`unstash.orgs.dependencies.get_org_context`, which sets
 ``app.current_org_id`` on the transaction — establishing the row-level
-security context — before any query runs.
+security context — before any query runs. Auth routes use
+:func:`get_session_unmanaged`; superuser routes use
+:func:`get_admin_session`.
 """
 
 from __future__ import annotations
@@ -53,26 +52,8 @@ def get_admin_sessionmaker() -> async_sessionmaker[AsyncSession]:
     )
 
 
-async def get_session() -> AsyncIterator[AsyncSession]:
-    """FastAPI dependency yielding a session inside a transaction.
-
-    The session is opened, a transaction is started, the route body runs, and
-    the transaction commits on clean exit or rolls back on exception. The
-    session is then closed, releasing the connection to the pool.
-
-    Usage::
-
-        @app.get("/something")
-        async def handler(session: Annotated[AsyncSession, Depends(get_session)]):
-            result = await session.execute(...)
-    """
-    sessionmaker = get_sessionmaker()
-    async with sessionmaker() as session, session.begin():
-        yield session
-
-
 async def get_session_unmanaged() -> AsyncIterator[AsyncSession]:
-    """Like get_session, but without an enclosing transaction.
+    """FastAPI dependency yielding a session without an enclosing transaction.
 
     For consumers that manage their own commits — notably FastAPI-Users'
     database adapters, which call ``session.commit()`` directly inside the

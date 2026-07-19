@@ -138,9 +138,10 @@ class JinaEmbedder:
         response = await self._http.post(payload)
 
         try:
-            ordered = sorted(response.json()["data"], key=lambda row: row["index"])
+            body = response.json()
+            ordered = sorted(body["data"], key=lambda row: row["index"])
             vectors = [row["embedding"] for row in ordered]
-            total_tokens = int(response.json().get("usage", {}).get("total_tokens", 0))
+            total_tokens = int(body.get("usage", {}).get("total_tokens", 0))
         except (KeyError, TypeError, ValueError) as exc:
             msg = f"Unexpected Jina response shape: {exc}"
             raise EmbeddingError(msg) from exc

@@ -37,6 +37,7 @@ class StartupCheckError(RuntimeError):
 REQUIRED_SECRETS: tuple[str, ...] = (
     "database_password",
     "database_migrations_password",
+    "database_admin_password",
     "session_secret",
     "encryption_key",
 )

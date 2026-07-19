@@ -6,8 +6,9 @@ NOBYPASSRLS) for ordinary org-scoped traffic, and as the ``unstash_admin`` role
 connect as ``unstash_migrations`` and are run exclusively by Alembic, never by
 application code at runtime.
 
-Most code should use the ``get_session`` FastAPI dependency rather than
-constructing engines directly. Admin routes use ``get_admin_session``.
+Code obtains sessions through the FastAPI dependencies rather than
+constructing engines directly: ``get_org_context`` (org-scoped routes),
+``get_session_unmanaged`` (auth), and ``get_admin_session`` (superuser).
 """
 
 from __future__ import annotations
@@ -15,7 +16,6 @@ from __future__ import annotations
 from unstash.db.engine import dispose_engine, get_admin_engine, get_engine
 from unstash.db.session import (
     get_admin_session,
-    get_session,
     get_session_unmanaged,
     get_sessionmaker,
 )
@@ -25,7 +25,6 @@ __all__ = [
     "get_admin_engine",
     "get_admin_session",
     "get_engine",
-    "get_session",
     "get_session_unmanaged",
     "get_sessionmaker",
 ]

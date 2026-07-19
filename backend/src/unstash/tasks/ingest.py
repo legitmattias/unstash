@@ -31,7 +31,14 @@ import structlog
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from unstash.db.models import Chunk, Document, DocumentMetadata, JobProgress
+from unstash.db.models import (
+    Chunk,
+    Document,
+    DocumentMetadata,
+    DocumentStatus,
+    JobProgress,
+    JobStatus,
+)
 from unstash.documents.metadata import (
     EXTRACTOR_VERSION,
     extract_amounts,
@@ -113,8 +120,8 @@ async def ingest_document(
             return
 
         started = datetime.now(UTC)
-        document.status = "parsing"
-        job.status = "running"
+        document.status = DocumentStatus.PARSING
+        job.status = JobStatus.RUNNING
         job.started_at = started
         await session.flush()
 
@@ -139,15 +146,15 @@ async def ingest_document(
                 duration_ms=round((finished - started).total_seconds() * 1000),
                 peak_rss_mib=round(peak_rss_mib(), 1),
             )
-            document.status = "failed"
+            document.status = DocumentStatus.FAILED
             document.parsing_error = f"{type(exc).__name__}: {exc}"
-            job.status = "failed"
+            job.status = JobStatus.FAILED
             job.error = document.parsing_error
             job.finished_at = finished
             await session.flush()
             return
 
-        document.status = "parsed"
+        document.status = DocumentStatus.PARSED
         chunk_count = await session.scalar(
             select(func.count(Chunk.id)).where(Chunk.document_id == document.id),
         )
@@ -230,18 +237,18 @@ async def embed_document(
                 exc_msg=str(exc),
                 duration_ms=round((finished - started).total_seconds() * 1000),
             )
-            document.status = "failed"
+            document.status = DocumentStatus.FAILED
             document.parsing_error = f"{type(exc).__name__}: {exc}"
-            job.status = "failed"
+            job.status = JobStatus.FAILED
             job.error = document.parsing_error
             job.finished_at = finished
             await session.flush()
             return
 
         finished = datetime.now(UTC)
-        document.status = "indexed"
+        document.status = DocumentStatus.INDEXED
         document.indexed_at = finished
-        job.status = "succeeded"
+        job.status = JobStatus.SUCCEEDED
         job.finished_at = finished
         logger.info(
             "embed_document_completed",

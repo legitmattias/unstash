@@ -21,7 +21,7 @@ from fastapi import (
 from sqlalchemy import func, select
 
 from unstash.config import get_settings
-from unstash.db.models import Document, JobProgress, Organisation
+from unstash.db.models import Document, DocumentStatus, JobProgress, JobStatus, Organisation
 from unstash.documents.schemas import (
     DocumentRead,
     DocumentUploadResponse,
@@ -31,7 +31,7 @@ from unstash.documents.storage import (
     UploadTooLargeError,
     write_uploaded_file,
 )
-from unstash.orgs.dependencies import CurrentUserDep, OrgContext, OrgContextDep
+from unstash.orgs.dependencies import OrgContext, OrgContextDep
 from unstash.tasks import ingest_document
 
 documents_router = APIRouter()
@@ -68,7 +68,6 @@ async def _enforce_daily_upload_limit(ctx: OrgContext) -> None:
 )
 async def upload_document(
     ctx: OrgContextDep,
-    user: CurrentUserDep,
     file: Annotated[UploadFile, File(...)],
     response: Response,
 ) -> DocumentUploadResponse:
@@ -114,14 +113,13 @@ async def upload_document(
             select(Document)
             .where(
                 Document.content_hash == stored.sha256_hex,
-                Document.status != "failed",
+                Document.status != DocumentStatus.FAILED,
             )
             .limit(1),
         )
     ).scalar_one_or_none()
     if existing is not None:
         await asyncio.to_thread(shutil.rmtree, stored.path.parent, True)
-        _ = user
         response.status_code = status.HTTP_200_OK
         return DocumentUploadResponse(
             document_id=existing.id,
@@ -140,7 +138,7 @@ async def upload_document(
         mime_type=mime_type,
         size_bytes=stored.size_bytes,
         content_hash=stored.sha256_hex,
-        status="pending",
+        status=DocumentStatus.PENDING,
     )
     ctx.session.add(document)
 
@@ -148,7 +146,7 @@ async def upload_document(
         org_id=ctx.org_id,
         task_id="pending",  # overwritten after kiq below
         task_name="ingest_document",
-        status="queued",
+        status=JobStatus.QUEUED,
     )
     ctx.session.add(job)
     await ctx.session.flush()
@@ -160,7 +158,6 @@ async def upload_document(
     )
     job.task_id = sent.task_id
 
-    _ = user  # explicit: present only to gate auth via dependency
     return DocumentUploadResponse(document_id=document.id, job_id=job.id)
 
 
@@ -170,7 +167,6 @@ async def upload_document(
 )
 async def list_documents(
     ctx: OrgContextDep,
-    user: CurrentUserDep,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[Document]:
@@ -179,7 +175,6 @@ async def list_documents(
     RLS scopes the query to ``app.current_org_id`` automatically; the
     handler only orders and paginates.
     """
-    _ = user
     stmt = select(Document).order_by(Document.created_at.desc()).limit(limit).offset(offset)
     return list((await ctx.session.execute(stmt)).scalars())
 
@@ -190,11 +185,9 @@ async def list_documents(
 )
 async def get_document(
     ctx: OrgContextDep,
-    user: CurrentUserDep,
     document_id: Annotated[uuid.UUID, Path(...)],
 ) -> Document:
     """Return a single document by id, or 404 if not in this org."""
-    _ = user
     document = await ctx.session.get(Document, document_id)
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
@@ -207,11 +200,9 @@ async def get_document(
 )
 async def get_job(
     ctx: OrgContextDep,
-    user: CurrentUserDep,
     job_id: Annotated[uuid.UUID, Path(...)],
 ) -> JobProgress:
     """Return the current state of a background job."""
-    _ = user
     job = await ctx.session.get(JobProgress, job_id)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
