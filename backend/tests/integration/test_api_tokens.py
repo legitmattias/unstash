@@ -13,8 +13,11 @@ from tests.integration.conftest import (
     TEST_ADMIN_PASSWORD,
     TEST_APP_PASSWORD,
     TEST_MIGRATIONS_PASSWORD,
+    login,
+    seed_membership,
+    seed_org,
+    seed_user,
 )
-from unstash.auth.manager import _password_helper
 from unstash.auth.tokens import hash_token
 from unstash.config import get_settings
 from unstash.db.engine import dispose_engine, get_admin_engine, get_engine
@@ -33,51 +36,9 @@ SUPERUSER_PASSWORD = uuid.uuid4().hex + "Aa1"
 USER_PASSWORD = uuid.uuid4().hex + "Aa1"
 
 
-async def _seed_user(
-    pool: asyncpg.Pool,
-    email: str,
-    password: str,
-    *,
-    is_superuser: bool,
-) -> uuid.UUID:
-    hashed = _password_helper().hash(password)
-    async with pool.acquire() as conn:
-        return await conn.fetchval(
-            "INSERT INTO users (email, hashed_password, is_active, is_verified, is_superuser) "
-            "VALUES ($1, $2, true, true, $3) RETURNING id",
-            email,
-            hashed,
-            is_superuser,
-        )
-
-
-async def _seed_org(pool: asyncpg.Pool, slug: str, name: str) -> uuid.UUID:
-    async with pool.acquire() as conn:
-        return await conn.fetchval(
-            "INSERT INTO organisations (slug, name) VALUES ($1, $2) RETURNING id",
-            slug,
-            name,
-        )
-
-
-async def _seed_membership(
-    pool: asyncpg.Pool,
-    user_id: uuid.UUID,
-    org_id: uuid.UUID,
-    role: str = "member",
-) -> None:
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO org_memberships (user_id, org_id, role) VALUES ($1, $2, $3)",
-            user_id,
-            org_id,
-            role,
-        )
-
-
 @pytest.fixture
 async def superuser_id(migrations_pool: asyncpg.Pool) -> uuid.UUID:
-    return await _seed_user(
+    return await seed_user(
         migrations_pool,
         SUPERUSER_EMAIL,
         SUPERUSER_PASSWORD,
@@ -87,7 +48,7 @@ async def superuser_id(migrations_pool: asyncpg.Pool) -> uuid.UUID:
 
 @pytest.fixture
 async def user_id(migrations_pool: asyncpg.Pool) -> uuid.UUID:
-    return await _seed_user(
+    return await seed_user(
         migrations_pool,
         USER_EMAIL,
         USER_PASSWORD,
@@ -129,14 +90,6 @@ async def app_client(
         await dispose_engine()
 
 
-async def _login(client: AsyncClient, email: str, password: str) -> None:
-    response = await client.post(
-        "/api/auth/login",
-        data={"username": email, "password": password},
-    )
-    assert response.status_code == 204, response.text
-
-
 async def _create_token(
     client: AsyncClient,
     user_id: uuid.UUID,
@@ -165,7 +118,7 @@ async def test_create_token_returns_plaintext_once(
 ) -> None:
     """Plaintext is returned at creation; the list endpoint never repeats it."""
     _ = superuser_id
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     body = await _create_token(app_client, user_id, name="ingestion-bot")
     assert body["token"].startswith("uns_test_")
     assert body["name"] == "ingestion-bot"
@@ -186,7 +139,7 @@ async def test_token_authenticates_against_auth_me(
 ) -> None:
     """A freshly minted Bearer token authenticates /api/auth/me as its owner."""
     _ = superuser_id
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     body = await _create_token(app_client, user_id)
     plaintext = body["token"]
 
@@ -208,10 +161,10 @@ async def test_token_authenticates_against_org_route(
 ) -> None:
     """A Bearer token works on org-scoped routes too."""
     _ = superuser_id
-    org_id = await _seed_org(migrations_pool, "acme", "Acme")
-    await _seed_membership(migrations_pool, user_id, org_id)
+    org_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_id, org_id)
 
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     body = await _create_token(app_client, user_id)
 
     app_client.cookies.clear()
@@ -231,10 +184,10 @@ async def test_org_scoped_token_works_on_its_own_org(
 ) -> None:
     """A token scoped to an org authenticates on that org's routes."""
     _ = superuser_id
-    org_id = await _seed_org(migrations_pool, "acme", "Acme")
-    await _seed_membership(migrations_pool, user_id, org_id)
+    org_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_id, org_id)
 
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     body = await _create_token(app_client, user_id, org_id=org_id)
     assert body["org_id"] == str(org_id)
 
@@ -254,12 +207,12 @@ async def test_org_scoped_token_rejected_on_other_org(
 ) -> None:
     """A token scoped to org A cannot reach org B, even for a member of both."""
     _ = superuser_id
-    org_a = await _seed_org(migrations_pool, "acme", "Acme")
-    org_b = await _seed_org(migrations_pool, "globex", "Globex")
-    await _seed_membership(migrations_pool, user_id, org_a)
-    await _seed_membership(migrations_pool, user_id, org_b)
+    org_a = await seed_org(migrations_pool, "acme", "Acme")
+    org_b = await seed_org(migrations_pool, "globex", "Globex")
+    await seed_membership(migrations_pool, user_id, org_a)
+    await seed_membership(migrations_pool, user_id, org_b)
 
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     body = await _create_token(app_client, user_id, org_id=org_a)
 
     app_client.cookies.clear()
@@ -286,11 +239,11 @@ async def test_unscoped_token_works_on_any_member_org(
 ) -> None:
     """An unscoped token (org_id NULL) reaches every org the user belongs to."""
     _ = superuser_id
-    await _seed_org(migrations_pool, "acme", "Acme")
-    org_b = await _seed_org(migrations_pool, "globex", "Globex")
-    await _seed_membership(migrations_pool, user_id, org_b)
+    await seed_org(migrations_pool, "acme", "Acme")
+    org_b = await seed_org(migrations_pool, "globex", "Globex")
+    await seed_membership(migrations_pool, user_id, org_b)
 
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     body = await _create_token(app_client, user_id)
     assert body["org_id"] is None
 
@@ -309,7 +262,7 @@ async def test_revoked_token_rejected(
 ) -> None:
     """A revoked token returns 401."""
     _ = superuser_id
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     body = await _create_token(app_client, user_id)
     token_id = body["id"]
 
@@ -333,7 +286,7 @@ async def test_expired_token_rejected(
 ) -> None:
     """A token past its ``expires_at`` returns 401."""
     _ = superuser_id
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     body = await _create_token(
         app_client,
         user_id,
@@ -374,7 +327,7 @@ async def test_bearer_takes_priority_over_cookie(
     the other user. The response must be the token's identity.
     """
     _ = superuser_id
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     body = await _create_token(app_client, user_id)
 
     # Cookie is still set in the client.
@@ -394,7 +347,7 @@ async def test_token_for_unknown_user_rejected(
 ) -> None:
     """A token whose user has been deleted returns 401."""
     _ = superuser_id
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     body = await _create_token(app_client, user_id)
 
     # Delete the user out from under the token (cascades nuke the token
@@ -418,7 +371,7 @@ async def test_last_used_at_updates_on_use(
 ) -> None:
     """``last_used_at`` is bumped after a successful Bearer auth."""
     _ = superuser_id
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     body = await _create_token(app_client, user_id)
 
     async with migrations_pool.acquire() as conn:
@@ -451,7 +404,7 @@ async def test_token_storage_is_hash_not_plaintext(
 ) -> None:
     """The DB row stores a SHA-256 digest, not the plaintext token."""
     _ = superuser_id
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     body = await _create_token(app_client, user_id)
 
     async with migrations_pool.acquire() as conn:
@@ -472,7 +425,7 @@ async def test_non_superuser_cannot_create_tokens(
     user_id: uuid.UUID,
 ) -> None:
     """A regular logged-in user cannot mint tokens for anyone."""
-    await _login(app_client, USER_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_EMAIL, USER_PASSWORD)
     response = await app_client.post(
         f"/api/admin/users/{user_id}/tokens",
         json={"name": "should-fail"},

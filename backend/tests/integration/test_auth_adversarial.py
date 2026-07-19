@@ -41,8 +41,11 @@ from tests.integration.conftest import (
     TEST_ADMIN_PASSWORD,
     TEST_APP_PASSWORD,
     TEST_MIGRATIONS_PASSWORD,
+    login,
+    seed_membership,
+    seed_org,
+    seed_user,
 )
-from unstash.auth.manager import _password_helper
 from unstash.config import get_settings
 from unstash.db.engine import dispose_engine, get_admin_engine, get_engine
 from unstash.db.session import get_admin_sessionmaker, get_sessionmaker
@@ -59,48 +62,6 @@ USER_A_EMAIL = "alice@example.com"
 USER_B_EMAIL = "bob@example.com"
 SUPERUSER_PASSWORD = uuid.uuid4().hex + "Aa1"
 USER_PASSWORD = uuid.uuid4().hex + "Aa1"
-
-
-async def _seed_user(
-    pool: asyncpg.Pool,
-    email: str,
-    password: str,
-    *,
-    is_superuser: bool = False,
-) -> uuid.UUID:
-    hashed = _password_helper().hash(password)
-    async with pool.acquire() as conn:
-        return await conn.fetchval(
-            "INSERT INTO users (email, hashed_password, is_active, is_verified, is_superuser) "
-            "VALUES ($1, $2, true, true, $3) RETURNING id",
-            email,
-            hashed,
-            is_superuser,
-        )
-
-
-async def _seed_org(pool: asyncpg.Pool, slug: str, name: str) -> uuid.UUID:
-    async with pool.acquire() as conn:
-        return await conn.fetchval(
-            "INSERT INTO organisations (slug, name) VALUES ($1, $2) RETURNING id",
-            slug,
-            name,
-        )
-
-
-async def _seed_membership(
-    pool: asyncpg.Pool,
-    user_id: uuid.UUID,
-    org_id: uuid.UUID,
-    role: str = "member",
-) -> uuid.UUID:
-    async with pool.acquire() as conn:
-        return await conn.fetchval(
-            "INSERT INTO org_memberships (user_id, org_id, role) VALUES ($1, $2, $3) RETURNING id",
-            user_id,
-            org_id,
-            role,
-        )
 
 
 def _set_test_env(monkeypatch: pytest.MonkeyPatch, host: str, port: int) -> None:
@@ -141,14 +102,6 @@ async def app_client(
         await dispose_engine()
 
 
-async def _login(client: AsyncClient, email: str, password: str) -> None:
-    response = await client.post(
-        "/api/auth/login",
-        data={"username": email, "password": password},
-    )
-    assert response.status_code == 204, response.text
-
-
 async def _create_token_as_admin(client: AsyncClient, user_id: uuid.UUID) -> str:
     """Helper: requires the client to already be logged in as a superuser."""
     response = await client.post(
@@ -178,13 +131,13 @@ async def test_rls_scopes_through_route_for_multi_org_user(
     test asserts that the returned membership has the Acme role, not
     the Beta role.
     """
-    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
-    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
-    beta_id = await _seed_org(migrations_pool, "beta", "Beta")
-    await _seed_membership(migrations_pool, user_a, acme_id, "member")
-    await _seed_membership(migrations_pool, user_a, beta_id, "admin")
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    beta_id = await seed_org(migrations_pool, "beta", "Beta")
+    await seed_membership(migrations_pool, user_a, acme_id, "member")
+    await seed_membership(migrations_pool, user_a, beta_id, "admin")
 
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
 
     acme_response = await app_client.get("/api/orgs/acme/me")
     assert acme_response.status_code == 200, acme_response.text
@@ -215,7 +168,7 @@ async def test_concurrent_sessions_are_independent(
     _ = migrated_database
     host, port = container_host_port
     _set_test_env(monkeypatch, host, port)
-    await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
 
     app = create_app()
 
@@ -224,8 +177,8 @@ async def test_concurrent_sessions_are_independent(
             AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client_a,
             AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client_b,
         ):
-            await _login(client_a, USER_A_EMAIL, USER_PASSWORD)
-            await _login(client_b, USER_A_EMAIL, USER_PASSWORD)
+            await login(client_a, USER_A_EMAIL, USER_PASSWORD)
+            await login(client_b, USER_A_EMAIL, USER_PASSWORD)
 
             # Sanity: both sessions can read /me.
             assert (await client_a.get("/api/auth/me")).status_code == 200
@@ -258,8 +211,8 @@ async def test_bearer_and_cookie_produce_identical_response(
     body must be the same — the auth mechanism is invisible to the
     route handler.
     """
-    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
-    await _seed_user(
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    await seed_user(
         migrations_pool,
         SUPERUSER_EMAIL,
         SUPERUSER_PASSWORD,
@@ -267,13 +220,13 @@ async def test_bearer_and_cookie_produce_identical_response(
     )
 
     # As superuser, mint a token for User A.
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     token = await _create_token_as_admin(app_client, user_a)
     await app_client.post("/api/auth/logout")
     app_client.cookies.clear()
 
     # As User A via cookie:
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
     via_cookie = await app_client.get("/api/auth/me")
     assert via_cookie.status_code == 200, via_cookie.text
 
@@ -299,23 +252,23 @@ async def test_bearer_and_cookie_observe_same_rls(
     then runs identically. The probe confirms an attacker cannot get a
     different visibility surface by switching auth mode.
     """
-    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
-    await _seed_user(
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    await seed_user(
         migrations_pool,
         SUPERUSER_EMAIL,
         SUPERUSER_PASSWORD,
         is_superuser=True,
     )
-    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
-    await _seed_membership(migrations_pool, user_a, acme_id, "member")
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id, "member")
 
     # Mint a token for User A.
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     token = await _create_token_as_admin(app_client, user_a)
     await app_client.post("/api/auth/logout")
     app_client.cookies.clear()
 
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
     via_cookie = await app_client.get("/api/orgs/acme/me")
     assert via_cookie.status_code == 200, via_cookie.text
 
@@ -340,17 +293,17 @@ async def test_revoked_token_rejected_on_org_routes_too(
     wrong layer) could let revoked tokens still pass on a subset of
     endpoints. The probe asserts uniform rejection.
     """
-    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
-    await _seed_user(
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    await seed_user(
         migrations_pool,
         SUPERUSER_EMAIL,
         SUPERUSER_PASSWORD,
         is_superuser=True,
     )
-    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
-    await _seed_membership(migrations_pool, user_a, acme_id, "member")
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id, "member")
 
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     create = await app_client.post(
         f"/api/admin/users/{user_a}/tokens",
         json={"name": "to-be-revoked"},
@@ -369,7 +322,7 @@ async def test_revoked_token_rejected_on_org_routes_too(
     assert sanity.status_code == 200, sanity.text
 
     # Revoke (as superuser via cookie).
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     revoke = await app_client.post(
         f"/api/admin/users/{user_a}/tokens/{token_id}/revoke",
     )
@@ -403,11 +356,11 @@ async def test_logged_out_cookie_cannot_access_org_routes(
     dependency caches "user from cookie" before the row deletion is
     observed.
     """
-    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
-    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
-    await _seed_membership(migrations_pool, user_a, acme_id, "member")
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id, "member")
 
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
     assert (await app_client.get("/api/auth/me")).status_code == 200
     assert (await app_client.get("/api/orgs/acme/me")).status_code == 200
 
@@ -429,14 +382,14 @@ async def test_user_a_constructing_org_b_url_is_403_not_data_leak(
     with leaked data, not 401 confusing the caller, not 404 hiding
     Beta's existence to a member of any other org).
     """
-    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
-    user_b = await _seed_user(migrations_pool, USER_B_EMAIL, USER_PASSWORD)
-    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
-    beta_id = await _seed_org(migrations_pool, "beta", "Beta")
-    await _seed_membership(migrations_pool, user_a, acme_id, "member")
-    await _seed_membership(migrations_pool, user_b, beta_id, "admin")
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    user_b = await seed_user(migrations_pool, USER_B_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    beta_id = await seed_org(migrations_pool, "beta", "Beta")
+    await seed_membership(migrations_pool, user_a, acme_id, "member")
+    await seed_membership(migrations_pool, user_b, beta_id, "admin")
 
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
     response = await app_client.get("/api/orgs/beta/me")
     assert response.status_code == 403
     # Sanity: the response body does not leak Beta's name or User B's id.

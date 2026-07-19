@@ -12,8 +12,10 @@ from tests.integration.conftest import (
     TEST_ADMIN_PASSWORD,
     TEST_APP_PASSWORD,
     TEST_MIGRATIONS_PASSWORD,
+    login,
+    seed_org,
+    seed_user,
 )
-from unstash.auth.manager import _password_helper
 from unstash.config import get_settings
 from unstash.db.engine import dispose_engine, get_admin_engine, get_engine
 from unstash.db.session import get_admin_sessionmaker, get_sessionmaker
@@ -32,39 +34,10 @@ REGULAR_USER_PASSWORD = uuid.uuid4().hex + "Aa1"
 NEW_USER_PASSWORD = uuid.uuid4().hex + "Aa1"
 
 
-async def _seed_user(
-    pool: asyncpg.Pool,
-    email: str,
-    password: str,
-    *,
-    is_superuser: bool,
-) -> uuid.UUID:
-    """Insert a user with a known password and return its id."""
-    hashed = _password_helper().hash(password)
-    async with pool.acquire() as conn:
-        return await conn.fetchval(
-            "INSERT INTO users (email, hashed_password, is_active, is_verified, is_superuser) "
-            "VALUES ($1, $2, true, true, $3) RETURNING id",
-            email,
-            hashed,
-            is_superuser,
-        )
-
-
-async def _seed_org(pool: asyncpg.Pool, slug: str, name: str) -> uuid.UUID:
-    """Insert an organisation and return its id."""
-    async with pool.acquire() as conn:
-        return await conn.fetchval(
-            "INSERT INTO organisations (slug, name) VALUES ($1, $2) RETURNING id",
-            slug,
-            name,
-        )
-
-
 @pytest.fixture
 async def superuser_id(migrations_pool: asyncpg.Pool) -> uuid.UUID:
     """Seed a superuser available for admin-route tests."""
-    return await _seed_user(
+    return await seed_user(
         migrations_pool,
         SUPERUSER_EMAIL,
         SUPERUSER_PASSWORD,
@@ -75,7 +48,7 @@ async def superuser_id(migrations_pool: asyncpg.Pool) -> uuid.UUID:
 @pytest.fixture
 async def regular_user_id(migrations_pool: asyncpg.Pool) -> uuid.UUID:
     """Seed a non-superuser used as the subject of admin operations."""
-    return await _seed_user(
+    return await seed_user(
         migrations_pool,
         REGULAR_USER_EMAIL,
         REGULAR_USER_PASSWORD,
@@ -86,7 +59,7 @@ async def regular_user_id(migrations_pool: asyncpg.Pool) -> uuid.UUID:
 @pytest.fixture
 async def org_id(migrations_pool: asyncpg.Pool) -> uuid.UUID:
     """Seed an organisation for membership tests."""
-    return await _seed_org(migrations_pool, "acme", "Acme")
+    return await seed_org(migrations_pool, "acme", "Acme")
 
 
 @pytest.fixture
@@ -123,14 +96,6 @@ async def app_client(
         await dispose_engine()
 
 
-async def _login(client: AsyncClient, email: str, password: str) -> None:
-    response = await client.post(
-        "/api/auth/login",
-        data={"username": email, "password": password},
-    )
-    assert response.status_code == 204, response.text
-
-
 async def test_create_user_unauthenticated_rejected(
     app_client: AsyncClient,
 ) -> None:
@@ -148,7 +113,7 @@ async def test_create_user_regular_user_rejected(
 ) -> None:
     """Authenticated non-superuser POST returns 403."""
     _ = regular_user_id
-    await _login(app_client, REGULAR_USER_EMAIL, REGULAR_USER_PASSWORD)
+    await login(app_client, REGULAR_USER_EMAIL, REGULAR_USER_PASSWORD)
     response = await app_client.post(
         "/api/admin/users",
         json={"email": "new@example.com", "password": NEW_USER_PASSWORD},
@@ -162,7 +127,7 @@ async def test_create_user_succeeds_as_superuser(
 ) -> None:
     """Superuser creates a user and gets back the created record."""
     _ = superuser_id
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     response = await app_client.post(
         "/api/admin/users",
         json={
@@ -184,7 +149,7 @@ async def test_create_user_conflict_on_duplicate_email(
 ) -> None:
     """Creating a user with an existing email returns 409."""
     _ = superuser_id, regular_user_id
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     response = await app_client.post(
         "/api/admin/users",
         json={"email": REGULAR_USER_EMAIL, "password": NEW_USER_PASSWORD},
@@ -198,7 +163,7 @@ async def test_create_user_weak_password_rejected(
 ) -> None:
     """Password shorter than 8 characters is rejected upfront by the schema."""
     _ = superuser_id
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     response = await app_client.post(
         "/api/admin/users",
         json={"email": "short@example.com", "password": "abc"},
@@ -213,7 +178,7 @@ async def test_list_users_returns_seeded_users(
 ) -> None:
     """List endpoint returns both seeded users."""
     _ = regular_user_id
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     response = await app_client.get("/api/admin/users")
     assert response.status_code == 200
     emails = {row["email"] for row in response.json()}
@@ -230,7 +195,7 @@ async def test_delete_user_succeeds(
 ) -> None:
     """Superuser can delete another user."""
     _ = superuser_id
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     response = await app_client.delete(f"/api/admin/users/{regular_user_id}")
     assert response.status_code == 204
 
@@ -245,7 +210,7 @@ async def test_delete_user_not_found(
 ) -> None:
     """Deleting a missing user returns 404."""
     _ = superuser_id
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     response = await app_client.delete(f"/api/admin/users/{uuid.uuid4()}")
     assert response.status_code == 404
 
@@ -258,7 +223,7 @@ async def test_add_membership_succeeds(
 ) -> None:
     """Superuser adds a regular user to an org with a role."""
     _ = superuser_id
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     response = await app_client.post(
         f"/api/admin/users/{regular_user_id}/memberships",
         json={"org_id": str(org_id), "role": "member"},
@@ -278,7 +243,7 @@ async def test_add_membership_conflict_on_duplicate(
 ) -> None:
     """Re-adding the same (user, org) pair returns 409."""
     _ = superuser_id
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     first = await app_client.post(
         f"/api/admin/users/{regular_user_id}/memberships",
         json={"org_id": str(org_id), "role": "member"},
@@ -298,7 +263,7 @@ async def test_add_membership_user_not_found(
 ) -> None:
     """Adding membership for an unknown user returns 404."""
     _ = superuser_id
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     response = await app_client.post(
         f"/api/admin/users/{uuid.uuid4()}/memberships",
         json={"org_id": str(org_id), "role": "member"},
@@ -314,7 +279,7 @@ async def test_remove_membership_succeeds(
 ) -> None:
     """Superuser removes a user's membership."""
     _ = superuser_id
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     create = await app_client.post(
         f"/api/admin/users/{regular_user_id}/memberships",
         json={"org_id": str(org_id), "role": "member"},
@@ -334,7 +299,7 @@ async def test_remove_membership_not_found(
 ) -> None:
     """Removing a non-existent membership returns 404."""
     _ = superuser_id
-    await _login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+    await login(app_client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     response = await app_client.delete(
         f"/api/admin/users/{regular_user_id}/memberships/{org_id}",
     )

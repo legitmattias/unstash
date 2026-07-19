@@ -20,8 +20,11 @@ from tests.integration.conftest import (
     TEST_ADMIN_PASSWORD,
     TEST_APP_PASSWORD,
     TEST_MIGRATIONS_PASSWORD,
+    login,
+    seed_membership,
+    seed_org,
+    seed_user,
 )
-from unstash.auth.manager import _password_helper
 from unstash.config import get_settings
 from unstash.db.engine import dispose_engine, get_admin_engine, get_engine
 from unstash.db.session import get_admin_sessionmaker, get_sessionmaker
@@ -36,40 +39,6 @@ if TYPE_CHECKING:
 USER_PASSWORD = uuid.uuid4().hex + "Aa1"
 USER_A_EMAIL = "searcher-a@example.com"
 USER_B_EMAIL = "searcher-b@example.com"
-
-
-async def _seed_user(pool: asyncpg.Pool, email: str, password: str) -> uuid.UUID:
-    hashed = _password_helper().hash(password)
-    async with pool.acquire() as conn:
-        return await conn.fetchval(
-            "INSERT INTO users (email, hashed_password, is_active, is_verified) "
-            "VALUES ($1, $2, true, true) RETURNING id",
-            email,
-            hashed,
-        )
-
-
-async def _seed_org(pool: asyncpg.Pool, slug: str, name: str) -> uuid.UUID:
-    async with pool.acquire() as conn:
-        return await conn.fetchval(
-            "INSERT INTO organisations (slug, name) VALUES ($1, $2) RETURNING id",
-            slug,
-            name,
-        )
-
-
-async def _seed_membership(
-    pool: asyncpg.Pool,
-    user_id: uuid.UUID,
-    org_id: uuid.UUID,
-) -> None:
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO org_memberships (user_id, org_id, role) VALUES ($1, $2, $3)",
-            user_id,
-            org_id,
-            "member",
-        )
 
 
 async def _seed_indexed_document(
@@ -155,22 +124,14 @@ async def app_client(
         await dispose_engine()
 
 
-async def _login(client: AsyncClient, email: str, password: str) -> None:
-    response = await client.post(
-        "/api/auth/login",
-        data={"username": email, "password": password},
-    )
-    assert response.status_code == 204, response.text
-
-
 async def test_search_finds_seeded_document(
     app_client: AsyncClient,
     migrations_pool: asyncpg.Pool,
 ) -> None:
     """The planted fact comes back, reranked, with a search log row."""
-    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
-    org_a = await _seed_org(migrations_pool, "org-a", "Org A")
-    await _seed_membership(migrations_pool, user_a, org_a)
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    org_a = await seed_org(migrations_pool, "org-a", "Org A")
+    await seed_membership(migrations_pool, user_a, org_a)
     roof_doc = await _seed_indexed_document(
         migrations_pool,
         org_a,
@@ -187,7 +148,7 @@ async def test_search_finds_seeded_document(
         ["Föreningens ekonomi är god och budgeten i balans."],
     )
 
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
     response = await app_client.get(
         "/api/orgs/org-a/search",
         params={"q": "takrenoveringen beslutade"},
@@ -227,11 +188,11 @@ async def test_search_empty_result_shape(
     migrations_pool: asyncpg.Pool,
 ) -> None:
     """No indexed content yields an explicit empty response, still logged."""
-    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
-    org_a = await _seed_org(migrations_pool, "org-a", "Org A")
-    await _seed_membership(migrations_pool, user_a, org_a)
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    org_a = await seed_org(migrations_pool, "org-a", "Org A")
+    await seed_membership(migrations_pool, user_a, org_a)
 
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
     response = await app_client.get(
         "/api/orgs/org-a/search",
         params={"q": "finns det något här"},
@@ -247,9 +208,9 @@ async def test_failed_document_with_embedded_chunks_is_not_searchable(
     migrations_pool: asyncpg.Pool,
 ) -> None:
     """A failed document keeps its committed chunks but must not surface."""
-    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
-    org_a = await _seed_org(migrations_pool, "org-a", "Org A")
-    await _seed_membership(migrations_pool, user_a, org_a)
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    org_a = await seed_org(migrations_pool, "org-a", "Org A")
+    await seed_membership(migrations_pool, user_a, org_a)
     await _seed_indexed_document(
         migrations_pool,
         org_a,
@@ -258,7 +219,7 @@ async def test_failed_document_with_embedded_chunks_is_not_searchable(
         status="failed",
     )
 
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
     response = await app_client.get(
         "/api/orgs/org-a/search",
         params={"q": "porttelefonen i entrén"},
@@ -272,9 +233,9 @@ async def test_click_reporting_round_trip(
     migrations_pool: asyncpg.Pool,
 ) -> None:
     """A reported click lands in the search log row."""
-    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
-    org_a = await _seed_org(migrations_pool, "org-a", "Org A")
-    await _seed_membership(migrations_pool, user_a, org_a)
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    org_a = await seed_org(migrations_pool, "org-a", "Org A")
+    await seed_membership(migrations_pool, user_a, org_a)
     doc = await _seed_indexed_document(
         migrations_pool,
         org_a,
@@ -282,7 +243,7 @@ async def test_click_reporting_round_trip(
         ["Avtal om elleverans till föreningens fastigheter."],
     )
 
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
     search = await app_client.get(
         "/api/orgs/org-a/search",
         params={"q": "avtal elleverans"},
@@ -313,9 +274,9 @@ async def test_multiple_clicks_accumulate_without_overwriting(
     migrations_pool: asyncpg.Pool,
 ) -> None:
     """A second click is recorded alongside the first, not on top of it."""
-    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
-    org_a = await _seed_org(migrations_pool, "org-a", "Org A")
-    await _seed_membership(migrations_pool, user_a, org_a)
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    org_a = await seed_org(migrations_pool, "org-a", "Org A")
+    await seed_membership(migrations_pool, user_a, org_a)
     doc_one = await _seed_indexed_document(
         migrations_pool,
         org_a,
@@ -329,7 +290,7 @@ async def test_multiple_clicks_accumulate_without_overwriting(
         ["Avtal om fjärrvärme och uppvärmning av fastigheten."],
     )
 
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
     search = await app_client.get(
         "/api/orgs/org-a/search",
         params={"q": "avtal"},
@@ -359,12 +320,12 @@ async def test_search_never_returns_other_org_content(
     migrations_pool: asyncpg.Pool,
 ) -> None:
     """Adversarial: org B's user cannot surface org A's chunks via search."""
-    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
-    user_b = await _seed_user(migrations_pool, USER_B_EMAIL, USER_PASSWORD)
-    org_a = await _seed_org(migrations_pool, "org-a", "Org A")
-    org_b = await _seed_org(migrations_pool, "org-b", "Org B")
-    await _seed_membership(migrations_pool, user_a, org_a)
-    await _seed_membership(migrations_pool, user_b, org_b)
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    user_b = await seed_user(migrations_pool, USER_B_EMAIL, USER_PASSWORD)
+    org_a = await seed_org(migrations_pool, "org-a", "Org A")
+    org_b = await seed_org(migrations_pool, "org-b", "Org B")
+    await seed_membership(migrations_pool, user_a, org_a)
+    await seed_membership(migrations_pool, user_b, org_b)
     await _seed_indexed_document(
         migrations_pool,
         org_a,
@@ -372,7 +333,7 @@ async def test_search_never_returns_other_org_content(
         ["Konfidentiellt styrelsebeslut om fastighetsförsäljningen."],
     )
 
-    await _login(app_client, USER_B_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_B_EMAIL, USER_PASSWORD)
 
     # Exact content match against the other org: nothing may come back.
     response = await app_client.get(
@@ -395,12 +356,12 @@ async def test_click_cannot_cross_orgs(
     migrations_pool: asyncpg.Pool,
 ) -> None:
     """Adversarial: click attribution cannot reference another org's data."""
-    user_a = await _seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
-    user_b = await _seed_user(migrations_pool, USER_B_EMAIL, USER_PASSWORD)
-    org_a = await _seed_org(migrations_pool, "org-a", "Org A")
-    org_b = await _seed_org(migrations_pool, "org-b", "Org B")
-    await _seed_membership(migrations_pool, user_a, org_a)
-    await _seed_membership(migrations_pool, user_b, org_b)
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    user_b = await seed_user(migrations_pool, USER_B_EMAIL, USER_PASSWORD)
+    org_a = await seed_org(migrations_pool, "org-a", "Org A")
+    org_b = await seed_org(migrations_pool, "org-b", "Org B")
+    await seed_membership(migrations_pool, user_a, org_a)
+    await seed_membership(migrations_pool, user_b, org_b)
     doc_a = await _seed_indexed_document(
         migrations_pool,
         org_a,
@@ -409,14 +370,14 @@ async def test_click_cannot_cross_orgs(
     )
 
     # Org A runs a legitimate search; org B tries to patch its log row.
-    await _login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
     search = await app_client.get(
         "/api/orgs/org-a/search",
         params={"q": "tvättstuga"},
     )
     search_id = search.json()["search_id"]
 
-    await _login(app_client, USER_B_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_B_EMAIL, USER_PASSWORD)
 
     # Org B cannot click-attribute org A's search via org B's slug:
     # the document lookup is org-scoped, so org A's doc is invisible.

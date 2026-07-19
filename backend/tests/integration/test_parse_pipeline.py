@@ -32,8 +32,11 @@ from tests.integration.conftest import (
     TEST_ADMIN_PASSWORD,
     TEST_APP_PASSWORD,
     TEST_MIGRATIONS_PASSWORD,
+    login,
+    seed_membership,
+    seed_org,
+    seed_user,
 )
-from unstash.auth.manager import _password_helper
 from unstash.config import get_settings
 from unstash.db.engine import dispose_engine, get_admin_engine, get_engine
 from unstash.db.session import get_admin_sessionmaker, get_sessionmaker
@@ -49,41 +52,6 @@ if TYPE_CHECKING:
 
 USER_PASSWORD = uuid.uuid4().hex + "Aa1"
 USER_EMAIL = "alice@example.com"
-
-
-async def _seed_user(pool: asyncpg.Pool, email: str, password: str) -> uuid.UUID:
-    hashed = _password_helper().hash(password)
-    async with pool.acquire() as conn:
-        return await conn.fetchval(
-            "INSERT INTO users (email, hashed_password, is_active, is_verified) "
-            "VALUES ($1, $2, true, true) RETURNING id",
-            email,
-            hashed,
-        )
-
-
-async def _seed_org(pool: asyncpg.Pool, slug: str, name: str) -> uuid.UUID:
-    async with pool.acquire() as conn:
-        return await conn.fetchval(
-            "INSERT INTO organisations (slug, name) VALUES ($1, $2) RETURNING id",
-            slug,
-            name,
-        )
-
-
-async def _seed_membership(
-    pool: asyncpg.Pool,
-    user_id: uuid.UUID,
-    org_id: uuid.UUID,
-    role: str = "member",
-) -> None:
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO org_memberships (user_id, org_id, role) VALUES ($1, $2, $3)",
-            user_id,
-            org_id,
-            role,
-        )
 
 
 def _make_synthetic_pdf(path: Path, lines: list[str]) -> None:
@@ -150,14 +118,6 @@ async def app_client(
         await dispose_engine()
 
 
-async def _login(client: AsyncClient, email: str, password: str) -> None:
-    response = await client.post(
-        "/api/auth/login",
-        data={"username": email, "password": password},
-    )
-    assert response.status_code == 204, response.text
-
-
 async def _poll_until_terminal(
     client: AsyncClient,
     slug: str,
@@ -186,9 +146,9 @@ async def test_pdf_upload_produces_chunks(
     tmp_path: Path,
 ) -> None:
     """A synthetic PDF parses, chunks land in the DB, status moves to parsed."""
-    user_a = await _seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
-    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
-    await _seed_membership(migrations_pool, user_a, acme_id)
+    user_a = await seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id)
 
     pdf_path = tmp_path / "tiny.pdf"
     _make_synthetic_pdf(
@@ -201,7 +161,7 @@ async def test_pdf_upload_produces_chunks(
         ],
     )
 
-    await _login(app_client, USER_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_EMAIL, USER_PASSWORD)
     with pdf_path.open("rb") as fh:
         response = await app_client.post(
             "/api/orgs/acme/documents",
@@ -265,9 +225,9 @@ async def test_corrupt_file_lands_in_failed_state(
     captures the error class+message in ``parsing_error``. The job
     lifecycle ends in ``failed``. The worker does not crash.
     """
-    user_a = await _seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
-    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
-    await _seed_membership(migrations_pool, user_a, acme_id)
+    user_a = await seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id)
 
     corrupt = tmp_path / "corrupt.pdf"
     # Bytes that libmagic detects as application/pdf (the %PDF-1.4
@@ -275,7 +235,7 @@ async def test_corrupt_file_lands_in_failed_state(
     # actually parse — anything after the header is junk.
     corrupt.write_bytes(b"%PDF-1.4\n" + b"\x00\xff" * 200 + b"deliberately invalid pdf body")
 
-    await _login(app_client, USER_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_EMAIL, USER_PASSWORD)
     with corrupt.open("rb") as fh:
         response = await app_client.post(
             "/api/orgs/acme/documents",
@@ -302,9 +262,9 @@ async def test_unsupported_mime_lands_in_failed_state(
     tmp_path: Path,
 ) -> None:
     """An executable masquerading as content goes to ``failed`` with reason."""
-    user_a = await _seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
-    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
-    await _seed_membership(migrations_pool, user_a, acme_id)
+    user_a = await seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id)
 
     # ELF binary header — libmagic will detect this as
     # application/x-pie-executable or similar, which the strategy
@@ -312,7 +272,7 @@ async def test_unsupported_mime_lands_in_failed_state(
     elf_blob = tmp_path / "claimed-pdf.pdf"
     elf_blob.write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 200)
 
-    await _login(app_client, USER_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_EMAIL, USER_PASSWORD)
     with elf_blob.open("rb") as fh:
         response = await app_client.post(
             "/api/orgs/acme/documents",
@@ -339,14 +299,14 @@ async def test_mime_detection_overrides_declared_type(
     bytes regardless of what the client said. The strategy router
     dispatches to EXTRACT, the document parses successfully.
     """
-    user_a = await _seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
-    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
-    await _seed_membership(migrations_pool, user_a, acme_id)
+    user_a = await seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id)
 
     pdf_path = tmp_path / "mystery.bin"
     _make_synthetic_pdf(pdf_path, ["Content despite the lying MIME header."])
 
-    await _login(app_client, USER_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_EMAIL, USER_PASSWORD)
     with pdf_path.open("rb") as fh:
         response = await app_client.post(
             "/api/orgs/acme/documents",
@@ -402,14 +362,14 @@ async def test_legacy_office_converts_then_parses(
         _fake_convert,
     )
 
-    user_a = await _seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
-    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
-    await _seed_membership(migrations_pool, user_a, acme_id)
+    user_a = await seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id)
 
     legacy = tmp_path / "protocol.doc"
     legacy.write_bytes(b"pretend legacy word document bytes")
 
-    await _login(app_client, USER_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_EMAIL, USER_PASSWORD)
     with legacy.open("rb") as fh:
         response = await app_client.post(
             "/api/orgs/acme/documents",
@@ -468,14 +428,14 @@ async def test_conversion_failure_lands_in_failed_state(
         _failing_convert,
     )
 
-    user_a = await _seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
-    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
-    await _seed_membership(migrations_pool, user_a, acme_id)
+    user_a = await seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id)
 
     legacy = tmp_path / "protocol.doc"
     legacy.write_bytes(b"pretend legacy word document bytes")
 
-    await _login(app_client, USER_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_EMAIL, USER_PASSWORD)
     with legacy.open("rb") as fh:
         response = await app_client.post(
             "/api/orgs/acme/documents",
@@ -540,14 +500,14 @@ async def test_scanned_pdf_goes_through_ocr(
 
     monkeypatch.setattr("unstash.documents.ocr.ocr_pdf_to_markdown", _fake_ocr)
 
-    user_a = await _seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
-    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
-    await _seed_membership(migrations_pool, user_a, acme_id)
+    user_a = await seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id)
 
     scan = tmp_path / "scan.pdf"
     _make_scanned_pdf(scan, ["PROTOKOLL", "Taket ska renoveras."])
 
-    await _login(app_client, USER_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_EMAIL, USER_PASSWORD)
     with scan.open("rb") as fh:
         response = await app_client.post(
             "/api/orgs/acme/documents",
@@ -581,14 +541,14 @@ async def test_scanned_pdf_with_ocr_off_fails_actionably(
     monkeypatch.setenv("UNSTASH_OCR_MIN_CHARS_PER_PAGE", "200")
     get_settings.cache_clear()
 
-    user_a = await _seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
-    acme_id = await _seed_org(migrations_pool, "acme", "Acme")
-    await _seed_membership(migrations_pool, user_a, acme_id)
+    user_a = await seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id)
 
     scan = tmp_path / "scan.pdf"
     _make_scanned_pdf(scan, ["PROTOKOLL", "Bara en bild, ingen text."])
 
-    await _login(app_client, USER_EMAIL, USER_PASSWORD)
+    await login(app_client, USER_EMAIL, USER_PASSWORD)
     with scan.open("rb") as fh:
         response = await app_client.post(
             "/api/orgs/acme/documents",
