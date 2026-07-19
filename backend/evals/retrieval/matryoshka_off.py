@@ -22,11 +22,10 @@ HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parents[1] / "src"))
 
-import numpy as np  # noqa: E402
-from bake_off import embed_jina, ingest_text_only, normalise, rank_vector_memory  # noqa: E402
-from eval_db import fresh_database  # noqa: E402
-from metrics import mrr, ndcg_at_k, recall_at_k  # noqa: E402
-from run_eval import load_golden, rank_bm25, rank_rrf  # noqa: E402
+from bake_off import embed_jina, ingest_text_only, normalise, rank_vector_memory
+from eval_db import fresh_database
+from metrics import mrr, ndcg_at_k, recall_at_k
+from run_eval import load_golden, rank_bm25, rank_rrf
 
 RRF_K = 20
 VECTOR_WEIGHT = 3.0
@@ -60,8 +59,10 @@ async def main() -> None:
             for i, q in enumerate(golden):
                 judgments = {rel["doc"]: rel["grade"] for rel in q["relevant"]}
                 vec = rank_vector_memory(query_matrix[i], chunk_matrix, chunk_doc, doc_titles)
-                ranked = vec if config == "vector" else rank_rrf(
-                    vec, bm25_ranked[i], RRF_K, VECTOR_WEIGHT, 1.0
+                ranked = (
+                    vec
+                    if config == "vector"
+                    else rank_rrf(vec, bm25_ranked[i], RRF_K, VECTOR_WEIGHT, 1.0)
                 )
                 overall.append(ndcg_at_k(ranked, judgments, 10))
                 mrrs.append(mrr(ranked, judgments))

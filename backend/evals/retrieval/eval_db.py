@@ -68,7 +68,7 @@ async def fresh_database() -> AsyncIterator[asyncpg.Pool]:
         from unstash.config import get_settings
 
         get_settings.cache_clear()
-        cwd = os.getcwd()
+        cwd = Path.cwd()
         os.chdir(BACKEND)
         try:
             command.upgrade(Config(str(BACKEND / "alembic.ini")), "head")

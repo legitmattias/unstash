@@ -84,7 +84,7 @@ SPECS: list[dict] = [
         "styrelseprotokoll",
         "2022-02-10",
         "Ordinary meeting. Roof inspection report received: renovation needed within two "
-        "years. DECISION to request quotes from at least two roofing contractors. OVK remarks від 2021 under åtgärd.",
+        "years. DECISION to request quotes from at least two roofing contractors. OVK remarks from 2021 under åtgärd.",
         ["takrenovering", "offerter"],
     ),
     spec(

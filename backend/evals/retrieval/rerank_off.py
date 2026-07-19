@@ -1,4 +1,4 @@
-"""Joint reranker × embedder experiment.
+"""Joint reranker x embedder experiment.
 
 For each embedder (jina-v4, jina-v5-text-small) and each reranker
 (jina-reranker-v2-base-multilingual, jina-reranker-v3), rerank the fused
@@ -28,12 +28,12 @@ HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parents[1] / "src"))
 
-import httpx  # noqa: E402
-import numpy as np  # noqa: E402
-from bake_off import embed_jina, ingest_text_only, rank_vector_memory  # noqa: E402
-from eval_db import fresh_database  # noqa: E402
-from metrics import mrr, ndcg_at_k  # noqa: E402
-from run_eval import load_golden, rank_bm25, rank_rrf  # noqa: E402
+import httpx
+import numpy as np
+from bake_off import embed_jina, ingest_text_only, rank_vector_memory
+from eval_db import fresh_database
+from metrics import mrr, ndcg_at_k
+from run_eval import load_golden, rank_bm25, rank_rrf
 
 RRF_K = 20
 VECTOR_WEIGHT = 3.0
@@ -112,7 +112,7 @@ async def main() -> None:
         bm25_ranked = [await rank_bm25(pool, q) for q in queries]
 
     title_to_index = {t: i for i, t in enumerate(doc_titles)}
-    lines = [f"# Reranker × embedder — {len(golden)} queries, fused top-{RERANK_CANDIDATES}", ""]
+    lines = [f"# Reranker x embedder — {len(golden)} queries, fused top-{RERANK_CANDIDATES}", ""]
     lines.append("| pair | all nDCG@10 | all MRR | keyword | semantic | decision | english |")
     lines.append("|---|---|---|---|---|---|---|")
 
