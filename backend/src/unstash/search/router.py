@@ -139,6 +139,7 @@ async def search(  # noqa: PLR0913 — query + optional filter params
                 mime_type=hit.mime_type,
                 chunk_id=hit.chunk_id,
                 excerpt=hit.excerpt,
+                snippet=hit.snippet,
                 score=hit.score,
                 rerank_score=hit.rerank_score,
             )

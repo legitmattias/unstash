@@ -39,6 +39,10 @@ if TYPE_CHECKING:
 logger = structlog.get_logger(__name__)
 
 
+_SNIPPET_MAX_CHARS = 240
+_SNIPPET_MIN_TERM_LEN = 3
+
+
 @dataclass(slots=True)
 class SearchHit:
     """One ranked document with its best-matching chunk."""
@@ -48,8 +52,37 @@ class SearchHit:
     mime_type: str
     chunk_id: uuid.UUID
     excerpt: str
+    snippet: str
     score: float
     rerank_score: float | None
+
+
+def make_snippet(text: str, query: str, *, max_chars: int = _SNIPPET_MAX_CHARS) -> str:
+    """A bounded, match-centred excerpt for a result list.
+
+    Centres a window on the first query term found in ``text`` (substring
+    match, so it also lands on Swedish inflections like ``avgift`` inside
+    ``avgiften``); falls back to the start when no term is present, e.g. a
+    purely semantic hit. Trimmed with ellipses when the text is clipped.
+    """
+    if len(text) <= max_chars:
+        return text
+    lowered = text.lower()
+    pos = -1
+    for term in query.lower().split():
+        if len(term) < _SNIPPET_MIN_TERM_LEN:
+            continue
+        pos = lowered.find(term)
+        if pos != -1:
+            break
+    if pos == -1:
+        return text[:max_chars].rstrip() + "…"
+    start = max(0, pos - max_chars // 3)
+    end = min(len(text), start + max_chars)
+    core = text[start:end].strip()
+    prefix = "…" if start > 0 else ""
+    suffix = "…" if end < len(text) else ""
+    return f"{prefix}{core}{suffix}"
 
 
 @dataclass(slots=True)
@@ -262,6 +295,7 @@ async def run_search(  # noqa: PLR0913 — pipeline inputs; grouping into an obj
             mime_type=c.mime_type,
             chunk_id=c.chunk_id,
             excerpt=c.excerpt,
+            snippet=make_snippet(c.excerpt, query),
             score=c.fused_score,
             rerank_score=rerank_scores[i],
         )

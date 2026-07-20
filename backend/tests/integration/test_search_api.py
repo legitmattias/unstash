@@ -170,6 +170,7 @@ async def test_search_finds_seeded_document(
     assert body["result_count"] >= 1
     assert body["results"][0]["document_id"] == str(roof_doc)
     assert "takrenoveringen" in body["results"][0]["excerpt"]
+    assert body["results"][0]["snippet"]  # bounded excerpt present
     assert body["reranked"] is True
     assert body["bm25_used"] is True
     assert body["latency_ms"] >= 0
