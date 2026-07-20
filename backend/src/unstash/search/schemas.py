@@ -14,7 +14,8 @@ class SearchResultItem(BaseModel):
     title: str
     mime_type: str
     chunk_id: uuid.UUID
-    excerpt: str
+    excerpt: str  # the full best-matching chunk
+    snippet: str  # a bounded, match-centred excerpt for the result list
     score: float
     rerank_score: float | None
 
