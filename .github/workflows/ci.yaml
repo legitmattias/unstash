@@ -346,6 +346,11 @@ jobs:
           # Jina/Mistral tests simply skip.
           JINA_API_KEY: ${{ github.event_name != 'pull_request' && secrets.JINA_API_KEY || '' }}
           MISTRAL_API_KEY: ${{ github.event_name != 'pull_request' && secrets.MISTRAL_API_KEY || '' }}
+          # The live NER test hits the hosted HF endpoint; it needs both
+          # the endpoint URL and its token, and like the other paid keys is
+          # withheld on PRs (test then skips).
+          NER_API_KEY: ${{ github.event_name != 'pull_request' && secrets.NER_API_KEY || '' }}
+          NER_ENDPOINT_URL: ${{ github.event_name != 'pull_request' && vars.NER_ENDPOINT_URL || '' }}
         run: uv run pytest tests/integration --no-cov
 
   # ---------------------------------------------------------------------------

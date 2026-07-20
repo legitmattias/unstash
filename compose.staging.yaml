@@ -57,9 +57,12 @@ services:
       - encryption_key
       - mistral_api_key
       - jina_api_key
+      - ner_api_key
     environment:
       UNSTASH_ENVIRONMENT: staging
       UNSTASH_OCR_BACKEND: mistral
+      UNSTASH_NER_BACKEND: hf
+      UNSTASH_NER_ENDPOINT_URL: ${NER_ENDPOINT_URL:?NER_ENDPOINT_URL must be set when UNSTASH_NER_BACKEND=hf}
       UNSTASH_DEBUG: "false"
       UNSTASH_LOG_LEVEL: DEBUG
     volumes:
@@ -132,3 +135,5 @@ secrets:
     file: ${SECRETS_DIR}/mistral_api_key
   jina_api_key:
     file: ${SECRETS_DIR}/jina_api_key
+  ner_api_key:
+    file: ${SECRETS_DIR}/ner_api_key
