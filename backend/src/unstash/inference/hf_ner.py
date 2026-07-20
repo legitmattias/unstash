@@ -12,7 +12,7 @@ the caller (ingest) logs a warning and proceeds with the document.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -73,7 +73,7 @@ class HfEndpointExtractor:
         if not isinstance(raw, list):
             msg = f"NER endpoint returned {type(raw).__name__}, expected a list"
             raise NerError(msg)
-        results: list[dict[str, Any]] = raw
+        results = cast("list[dict[str, Any]]", raw)
         return entities_from_tagged(results, self._min_score)
 
     async def _post_with_retries(
