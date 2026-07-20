@@ -206,23 +206,30 @@ class Settings(BaseSettings):
     )
 
     # -- NER (named-entity recognition) ----------------------------------------
-    # 'off' disables entity extraction (the default until it is wired into
-    # ingest); 'kb-bert' runs the local Swedish model; 'fake' is the
-    # deterministic test backend. A hosted-endpoint backend slots in here
-    # as another value without touching callers (ADR 0009).
+    # 'off' disables entity extraction (the default until an endpoint is
+    # configured); 'hf' calls an EU scale-to-zero HuggingFace Inference
+    # Endpoint; 'kb-bert' runs the local Swedish model in the worker; 'fake'
+    # is the deterministic test backend. Selecting a backend touches no
+    # caller (ADR 0009).
 
     ner_backend: str = Field(
         default="off",
-        description="Entity-extraction backend: 'off', 'kb-bert', or 'fake'.",
+        description="Entity-extraction backend: 'off', 'hf', 'kb-bert', or 'fake'.",
     )
     ner_model: str = Field(default="KBLab/bert-base-swedish-cased-ner")
     ner_min_score: float = Field(default=0.7, gt=0, le=1)
+    ner_endpoint_url: str = Field(
+        default="",
+        description="Token-classification endpoint URL for the 'hf' backend.",
+    )
+    ner_timeout_seconds: float = Field(default=30.0, gt=0)
 
     # -- External APIs ---------------------------------------------------------
     # Added when their respective features are implemented.
 
     jina_api_key: str = Field(default="", alias="jina_api_key")
     mistral_api_key: str = Field(default="", alias="mistral_api_key")
+    ner_api_key: str = Field(default="", alias="ner_api_key")
 
     # -- Derived properties ----------------------------------------------------
 

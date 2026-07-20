@@ -13,6 +13,7 @@ only the worker pays the transformers + torch cost.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Protocol, cast
@@ -44,9 +45,13 @@ class ExtractedEntity:
 
 
 class EntityExtractor(Protocol):
-    """Finds named entities in text. Implemented per backend and by a fake."""
+    """Finds named entities in text. Implemented per backend and by a fake.
 
-    def extract(self, text: str) -> list[ExtractedEntity]:
+    ``extract`` is async so a hosted-endpoint backend can make an HTTP call
+    on the same seam; local backends wrap their blocking work in a thread.
+    """
+
+    async def extract(self, text: str) -> list[ExtractedEntity]:
         """Return the named entities found in ``text``."""
         ...
 
@@ -80,6 +85,33 @@ def _map_label(entity_group: str) -> str | None:
     return _PRIMARY_LABEL.get(entity_group.split("/", 1)[0])
 
 
+def entities_from_tagged(
+    results: list[dict[str, Any]],
+    min_score: float,
+) -> list[ExtractedEntity]:
+    """Map aggregated token-classification spans to our entity categories.
+
+    Shared by every token-classification backend (local pipeline or hosted
+    endpoint), which return the same ``entity_group``/``score``/``word``
+    shape. De-duplicated by (text, label); spans below the confidence floor
+    or outside the mapped category set are dropped.
+    """
+    entities: list[ExtractedEntity] = []
+    seen: set[tuple[str, str]] = set()
+    for item in results:
+        label = _map_label(str(item["entity_group"]))
+        score = float(item["score"])
+        word = str(item["word"]).strip()
+        if label is None or score < min_score or not word:
+            continue
+        key = (word.casefold(), label)
+        if key in seen:
+            continue
+        seen.add(key)
+        entities.append(ExtractedEntity(text=word, label=label, score=score))
+    return entities
+
+
 class KbBertExtractor:
     """Local KB-BERT extractor (transformers + torch, worker-only)."""
 
@@ -88,37 +120,27 @@ class KbBertExtractor:
         self._model = model
         self._min_score = min_score
 
-    def extract(self, text: str) -> list[ExtractedEntity]:
+    async def extract(self, text: str) -> list[ExtractedEntity]:
         """Return the named entities KB-BERT finds in Swedish ``text``.
 
-        De-duplicated by (text, label); entities below the confidence
-        floor or outside the person/organisation/location/time/event set
-        are dropped.
+        The transformers pipeline is blocking, so it runs in a thread to
+        keep the worker's event loop responsive. De-duplicated by (text,
+        label); entities below the confidence floor or outside the
+        person/organisation/location/time/event set are dropped.
         """
         if not text.strip():
             return []
+        return await asyncio.to_thread(self._extract_sync, text)
 
+    def _extract_sync(self, text: str) -> list[ExtractedEntity]:
         results: list[dict[str, Any]] = _build_pipeline(self._model)(text)
-        entities: list[ExtractedEntity] = []
-        seen: set[tuple[str, str]] = set()
-        for item in results:
-            label = _map_label(str(item["entity_group"]))
-            score = float(item["score"])
-            word = str(item["word"]).strip()
-            if label is None or score < self._min_score or not word:
-                continue
-            key = (word.casefold(), label)
-            if key in seen:
-                continue
-            seen.add(key)
-            entities.append(ExtractedEntity(text=word, label=label, score=score))
-        return entities
+        return entities_from_tagged(results, self._min_score)
 
 
 class NullEntityExtractor:
     """No-op extractor for when NER is disabled."""
 
-    def extract(self, text: str) -> list[ExtractedEntity]:
+    async def extract(self, text: str) -> list[ExtractedEntity]:
         """Return no entities."""
         _ = text
         return []
@@ -133,7 +155,7 @@ class FakeEntityExtractor:
 
     _MIN_TOKEN_LEN = 2
 
-    def extract(self, text: str) -> list[ExtractedEntity]:
+    async def extract(self, text: str) -> list[ExtractedEntity]:
         """Return capitalised mid-sentence words as person entities."""
         entities: list[ExtractedEntity] = []
         seen: set[str] = set()
@@ -153,6 +175,17 @@ def get_entity_extractor(settings: Settings) -> EntityExtractor:
     """Return the configured entity extractor for ``settings.ner_backend``."""
     if settings.ner_backend == "kb-bert":
         return KbBertExtractor(model=settings.ner_model, min_score=settings.ner_min_score)
+    if settings.ner_backend == "hf":
+        # Imported here so the transformers-free hosted path doesn't pull in
+        # the provider module unless selected.
+        from unstash.inference.hf_ner import HfEndpointExtractor  # noqa: PLC0415
+
+        return HfEndpointExtractor(
+            endpoint_url=settings.ner_endpoint_url,
+            api_key=settings.ner_api_key,
+            min_score=settings.ner_min_score,
+            timeout=settings.ner_timeout_seconds,
+        )
     if settings.ner_backend == "fake":
         return FakeEntityExtractor()
     return NullEntityExtractor()
