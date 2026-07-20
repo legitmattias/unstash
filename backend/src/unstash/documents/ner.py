@@ -85,6 +85,33 @@ def _map_label(entity_group: str) -> str | None:
     return _PRIMARY_LABEL.get(entity_group.split("/", 1)[0])
 
 
+def entities_from_tagged(
+    results: list[dict[str, Any]],
+    min_score: float,
+) -> list[ExtractedEntity]:
+    """Map aggregated token-classification spans to our entity categories.
+
+    Shared by every token-classification backend (local pipeline or hosted
+    endpoint), which return the same ``entity_group``/``score``/``word``
+    shape. De-duplicated by (text, label); spans below the confidence floor
+    or outside the mapped category set are dropped.
+    """
+    entities: list[ExtractedEntity] = []
+    seen: set[tuple[str, str]] = set()
+    for item in results:
+        label = _map_label(str(item["entity_group"]))
+        score = float(item["score"])
+        word = str(item["word"]).strip()
+        if label is None or score < min_score or not word:
+            continue
+        key = (word.casefold(), label)
+        if key in seen:
+            continue
+        seen.add(key)
+        entities.append(ExtractedEntity(text=word, label=label, score=score))
+    return entities
+
+
 class KbBertExtractor:
     """Local KB-BERT extractor (transformers + torch, worker-only)."""
 
@@ -107,20 +134,7 @@ class KbBertExtractor:
 
     def _extract_sync(self, text: str) -> list[ExtractedEntity]:
         results: list[dict[str, Any]] = _build_pipeline(self._model)(text)
-        entities: list[ExtractedEntity] = []
-        seen: set[tuple[str, str]] = set()
-        for item in results:
-            label = _map_label(str(item["entity_group"]))
-            score = float(item["score"])
-            word = str(item["word"]).strip()
-            if label is None or score < self._min_score or not word:
-                continue
-            key = (word.casefold(), label)
-            if key in seen:
-                continue
-            seen.add(key)
-            entities.append(ExtractedEntity(text=word, label=label, score=score))
-        return entities
+        return entities_from_tagged(results, self._min_score)
 
 
 class NullEntityExtractor:
@@ -161,6 +175,17 @@ def get_entity_extractor(settings: Settings) -> EntityExtractor:
     """Return the configured entity extractor for ``settings.ner_backend``."""
     if settings.ner_backend == "kb-bert":
         return KbBertExtractor(model=settings.ner_model, min_score=settings.ner_min_score)
+    if settings.ner_backend == "hf":
+        # Imported here so the transformers-free hosted path doesn't pull in
+        # the provider module unless selected.
+        from unstash.inference.hf_ner import HfEndpointExtractor  # noqa: PLC0415
+
+        return HfEndpointExtractor(
+            endpoint_url=settings.ner_endpoint_url,
+            api_key=settings.ner_api_key,
+            min_score=settings.ner_min_score,
+            timeout=settings.ner_timeout_seconds,
+        )
     if settings.ner_backend == "fake":
         return FakeEntityExtractor()
     return NullEntityExtractor()
