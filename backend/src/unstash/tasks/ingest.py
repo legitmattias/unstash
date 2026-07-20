@@ -477,22 +477,38 @@ async def _extract_metadata(
     document: Document,
     parsed: ParsedDocument,
 ) -> None:
-    """Extract dates and amounts into document_metadata, best-effort.
+    """Extract dates, amounts, and entities into document_metadata, best-effort.
 
     Failures log a warning and never fail the document — metadata is a
-    search-filter enhancement, not part of the parse contract. ``entities``
-    stays NULL until NER runs in the worker (gated on the host migration).
+    search-filter enhancement, not part of the parse contract. Entity
+    extraction (NER) runs only when a backend is configured
+    (``ner_backend`` != 'off'); otherwise ``entities`` stays NULL.
     Upserts on document_id so a task retry refreshes rather than duplicates.
     """
+    from unstash.config import get_settings  # noqa: PLC0415
+    from unstash.documents.ner import get_entity_extractor  # noqa: PLC0415
+
+    settings = get_settings()
     try:
         text = "\n".join(chunk.text for chunk in parsed.chunks)
         dates = [asdict(date) for date in extract_dates(text)]
         amounts = [asdict(amount) for amount in extract_amounts(text)]
-        values = {
+        values: dict[str, object] = {
             "dates": dates,
             "amounts": amounts,
             "extractor_version": EXTRACTOR_VERSION,
         }
+        # Only touch ``entities`` when a NER backend is configured, so a
+        # NULL keeps meaning "never processed" — the signal the backfill
+        # task selects on.
+        entity_count: int | None = None
+        if settings.ner_backend != "off":
+            entities = [
+                {"text": e.text, "label": e.label, "score": e.score}
+                for e in await get_entity_extractor(settings).extract(text)
+            ]
+            values["entities"] = entities
+            entity_count = len(entities)
         statement = (
             pg_insert(DocumentMetadata)
             .values(org_id=document.org_id, document_id=document.id, **values)
@@ -507,6 +523,7 @@ async def _extract_metadata(
             document_id=str(document.id),
             dates=len(dates),
             amounts=len(amounts),
+            entities=entity_count,
         )
     except Exception as exc:
         logger.warning(

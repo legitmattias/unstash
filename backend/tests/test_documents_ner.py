@@ -31,7 +31,7 @@ def _patch_pipeline(
     monkeypatch.setattr(ner_module, "_build_pipeline", lambda _model: _pipeline)
 
 
-def test_maps_labels_and_filters(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_maps_labels_and_filters(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_pipeline(
         monkeypatch,
         [
@@ -43,7 +43,7 @@ def test_maps_labels_and_filters(monkeypatch: pytest.MonkeyPatch) -> None:
         ],
     )
 
-    entities = _extractor().extract("...")
+    entities = await _extractor().extract("...")
 
     assert entities == [
         ExtractedEntity(text="Anna Svensson", label="person", score=0.99),
@@ -52,7 +52,7 @@ def test_maps_labels_and_filters(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
 
 
-def test_compound_label_maps_by_first_component(
+async def test_compound_label_maps_by_first_component(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_pipeline(
@@ -62,14 +62,14 @@ def test_compound_label_maps_by_first_component(
             {"entity_group": "ORG/PRS", "word": "Handelsbanken", "score": 0.9},
         ],
     )
-    entities = _extractor().extract("...")
+    entities = await _extractor().extract("...")
     assert [(e.text, e.label) for e in entities] == [
         ("Kommunen", "location"),
         ("Handelsbanken", "organisation"),
     ]
 
 
-def test_deduplicates_by_text_and_label(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_deduplicates_by_text_and_label(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_pipeline(
         monkeypatch,
         [
@@ -77,38 +77,38 @@ def test_deduplicates_by_text_and_label(monkeypatch: pytest.MonkeyPatch) -> None
             {"entity_group": "PER", "word": "anna", "score": 0.88},
         ],
     )
-    entities = _extractor().extract("...")
+    entities = await _extractor().extract("...")
     assert len(entities) == 1
     assert entities[0].text == "Anna"
 
 
-def test_min_score_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_min_score_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_pipeline(
         monkeypatch,
         [{"entity_group": "PER", "word": "Osäker", "score": 0.50}],
     )
-    assert _extractor(min_score=0.9).extract("...") == []
-    assert _extractor(min_score=0.4).extract("...") == [
+    assert await _extractor(min_score=0.9).extract("...") == []
+    assert await _extractor(min_score=0.4).extract("...") == [
         ExtractedEntity(text="Osäker", label="person", score=0.50),
     ]
 
 
-def test_empty_text_skips_the_model(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_empty_text_skips_the_model(monkeypatch: pytest.MonkeyPatch) -> None:
     def _fail(_model: str) -> object:
         pytest.fail("pipeline should not load for empty text")
 
     monkeypatch.setattr(ner_module, "_build_pipeline", _fail)
-    assert _extractor().extract("   ") == []
+    assert await _extractor().extract("   ") == []
 
 
-def test_null_extractor_returns_nothing() -> None:
-    assert NullEntityExtractor().extract("Anna Svensson bor i Stockholm.") == []
+async def test_null_extractor_returns_nothing() -> None:
+    assert await NullEntityExtractor().extract("Anna Svensson bor i Stockholm.") == []
 
 
-def test_fake_extractor_is_deterministic() -> None:
+async def test_fake_extractor_is_deterministic() -> None:
     fake = FakeEntityExtractor()
-    first = fake.extract("Anna Svensson bor i Stockholm och möter Erik.")
-    second = fake.extract("Anna Svensson bor i Stockholm och möter Erik.")
+    first = await fake.extract("Anna Svensson bor i Stockholm och möter Erik.")
+    second = await fake.extract("Anna Svensson bor i Stockholm och möter Erik.")
     assert first == second
     words = {e.text for e in first}
     assert {"Svensson", "Stockholm", "Erik"} <= words

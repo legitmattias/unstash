@@ -20,6 +20,7 @@ the cache hit path is exercised there.
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from typing import TYPE_CHECKING
 
@@ -90,6 +91,7 @@ async def app_client(
     monkeypatch.setenv("UNSTASH_ENVIRONMENT", "test")
     monkeypatch.setenv("UNSTASH_DOCUMENTS_ROOT", str(docs_root))
     monkeypatch.setenv("UNSTASH_EMBEDDER_BACKEND", "fake")
+    monkeypatch.setenv("UNSTASH_NER_BACKEND", "fake")
     # Tiny synthetic fixtures fall below any realistic chars-per-page
     # threshold; the OCR tests opt back in explicitly.
     monkeypatch.setenv("UNSTASH_OCR_MIN_CHARS_PER_PAGE", "0")
@@ -210,7 +212,10 @@ async def test_pdf_upload_produces_chunks(
     assert "2024-03-15" in meta["dates"]
     assert '"SEK"' in meta["amounts"]
     assert "1234" in meta["amounts"]
-    assert meta["entities"] is None  # NER not wired yet
+    # NER ran (fake backend): entities are populated, not left NULL.
+    assert meta["entities"] is not None
+    entities = json.loads(meta["entities"])
+    assert any(e["label"] == "person" for e in entities)
     assert meta["extractor_version"]
 
 
