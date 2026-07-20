@@ -39,7 +39,8 @@ async def test_hf_endpoint_extracts_swedish_entities() -> None:
 
     assert entities, "expected at least one entity from the live model"
     labels = {entity.label for entity in entities}
-    # KB-BERT tags people as PER and organisations as ORG; the sentence
-    # carries both. At least one should survive the score threshold.
-    assert labels & {"PER", "ORG"}
+    # The extractor maps raw token tags (PER/ORG/…) to our categories; the
+    # sentence carries a person and an organisation, so at least one of
+    # those mapped labels should survive the score threshold.
+    assert labels & {"person", "organisation"}
     assert all(entity.score >= 0.5 for entity in entities)
