@@ -18,10 +18,14 @@ import httpx
 
 from unstash.documents.ner import ExtractedEntity, entities_from_tagged
 
-# A scale-to-zero endpoint returns 503 while the replica cold-starts; retry
-# through that in addition to the usual transient statuses.
+# A scale-to-zero endpoint returns 503 while the replica cold-starts, so 503
+# is retried alongside the usual transient statuses. Capped exponential
+# backoff over these attempts sums to ~2 minutes (1+2+4+8+16+30+30+30), the
+# cold-start window for the replica. NER is best-effort: on exhaustion the
+# document is indexed without entities.
 _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
-_MAX_RETRIES = 4
+_MAX_RETRIES = 8
+_BACKOFF_CAP_SECONDS = 30.0
 
 
 class NerError(RuntimeError):
@@ -29,8 +33,8 @@ class NerError(RuntimeError):
 
 
 def _backoff_seconds(attempt: int) -> float:
-    """Exponential backoff: 1s, 2s, 4s, ... — generous for cold starts."""
-    return 1.0 * (2**attempt)
+    """Exponential backoff (1s, 2s, 4s, …) capped for scale-to-zero waits."""
+    return min(_BACKOFF_CAP_SECONDS, 2.0**attempt)
 
 
 class HfEndpointExtractor:
@@ -62,8 +66,7 @@ class HfEndpointExtractor:
             "inputs": text,
             "parameters": {"aggregation_strategy": "first"},
         }
-        headers = {"Authorization": f"Bearer {self._api_key}"}
-        response = await self._post_with_retries(payload, headers)
+        response = await self._post_with_retries(payload)
 
         try:
             raw: Any = response.json()
@@ -79,13 +82,18 @@ class HfEndpointExtractor:
     async def _post_with_retries(
         self,
         payload: dict[str, object],
-        headers: dict[str, str],
     ) -> httpx.Response:
         last_error: Exception | None = None
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
+        # The bearer token is set as a client default header rather than a
+        # frame-local value, keeping it out of tracebacks and structured
+        # logs (e.g. pytest --showlocals).
+        async with httpx.AsyncClient(
+            timeout=self._timeout,
+            headers={"Authorization": f"Bearer {self._api_key}"},
+        ) as client:
             for attempt in range(_MAX_RETRIES + 1):
                 try:
-                    response = await client.post(self._url, json=payload, headers=headers)
+                    response = await client.post(self._url, json=payload)
                 except httpx.HTTPError as exc:
                     last_error = exc
                 else:
