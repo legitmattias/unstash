@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 import uuid  # noqa: TC003
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -27,7 +27,7 @@ from unstash.search.schemas import (
     SearchResponse,
     SearchResultItem,
 )
-from unstash.search.service import run_search
+from unstash.search.service import SearchFilters, run_search
 
 if TYPE_CHECKING:
     from unstash.config import Settings
@@ -36,6 +36,9 @@ if TYPE_CHECKING:
 search_router = APIRouter()
 
 QueryParam = Annotated[str, Query(min_length=1, max_length=1000, alias="q")]
+MimeFilter = Annotated[str | None, Query(max_length=255, alias="mime_type")]
+DateFromFilter = Annotated[date | None, Query(alias="date_from")]
+DateToFilter = Annotated[date | None, Query(alias="date_to")]
 
 
 def _logged_results(outcome: SearchOutcome) -> list[dict[str, Any]]:
@@ -51,7 +54,11 @@ def _logged_results(outcome: SearchOutcome) -> list[dict[str, Any]]:
     ]
 
 
-def _ranking_config(outcome: SearchOutcome, settings: Settings) -> dict[str, Any]:
+def _ranking_config(
+    outcome: SearchOutcome,
+    settings: Settings,
+    filters: SearchFilters,
+) -> dict[str, Any]:
     """The configuration that produced the results, for click attribution."""
     return {
         "reranked": outcome.reranked,
@@ -63,18 +70,31 @@ def _ranking_config(outcome: SearchOutcome, settings: Settings) -> dict[str, Any
         "embedder_model": settings.jina_embedding_model,
         "reranker_backend": settings.reranker_backend,
         "reranker_model": settings.jina_rerank_model,
+        "filters": {
+            "mime_type": filters.mime_type,
+            "date_from": filters.date_from,
+            "date_to": filters.date_to,
+        },
     }
 
 
 @search_router.get("/orgs/{slug}/search", response_model=SearchResponse)
-async def search(
+async def search(  # noqa: PLR0913 — query + optional filter params
     request: Request,
     ctx: OrgContextDep,
     user: CurrentUserDep,
     q: QueryParam,
+    mime_type: MimeFilter = None,
+    date_from: DateFromFilter = None,
+    date_to: DateToFilter = None,
 ) -> SearchResponse:
-    """Run a hybrid search and log it."""
+    """Run a hybrid search, optionally filtered by mime type and date range."""
     settings = get_settings()
+    filters = SearchFilters(
+        mime_type=mime_type,
+        date_from=date_from.isoformat() if date_from else None,
+        date_to=date_to.isoformat() if date_to else None,
+    )
     # Absent outside the lifespan (e.g. ASGI test transports); clients
     # then fall back to a per-call connection.
     http_client = getattr(request.app.state, "http_client", None)
@@ -87,6 +107,7 @@ async def search(
             embedder=get_embedder(settings, http_client=http_client),
             reranker=get_reranker(settings, http_client=http_client),
             settings=settings,
+            filters=filters,
         )
     except EmbeddingError as exc:
         raise HTTPException(
@@ -103,7 +124,7 @@ async def search(
         latency_ms=latency_ms,
         top_document_id=outcome.hits[0].document_id if outcome.hits else None,
         results=_logged_results(outcome),
-        ranking_config=_ranking_config(outcome, settings),
+        ranking_config=_ranking_config(outcome, settings, filters),
     )
     ctx.session.add(log_row)
     await ctx.session.flush()

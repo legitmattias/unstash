@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy import RowMapping
     from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.sql.elements import TextClause
 
     from unstash.config import Settings
     from unstash.documents.embedder import Embedder
@@ -70,32 +71,78 @@ class _Candidate:
     fused_score: float
 
 
+@dataclass(frozen=True, slots=True)
+class SearchFilters:
+    """Optional metadata filters restricting which documents are searchable."""
+
+    mime_type: str | None = None
+    date_from: str | None = None  # inclusive ISO date bound
+    date_to: str | None = None  # inclusive ISO date bound
+
+    @property
+    def any(self) -> bool:
+        """True when at least one filter is set."""
+        return any((self.mime_type, self.date_from, self.date_to))
+
+
+# The date filter matches a document that carries at least one extracted
+# date within the range. document_metadata is org-scoped (RLS), and a
+# partial ``YYYY-MM`` iso is treated as the first of the month so it can be
+# compared as a date.
+_DATE_FILTER = (
+    " AND EXISTS ("
+    "  SELECT 1 FROM document_metadata dm,"
+    "  jsonb_array_elements(dm.dates) AS elem"
+    "  WHERE dm.document_id = d.id"
+    "  AND (CASE WHEN length(elem->>'iso') = 10 THEN (elem->>'iso')::date"
+    "            ELSE ((elem->>'iso') || '-01')::date END)"
+    "  BETWEEN to_date(:date_from, 'YYYY-MM-DD') AND to_date(:date_to, 'YYYY-MM-DD'))"
+)
+
+
+def _filter_clause(filters: SearchFilters) -> tuple[str, dict[str, object]]:
+    """Build an additional WHERE fragment and its bind params.
+
+    Fragment strings are fixed; every user value travels as a bind
+    parameter, so the spliced SQL carries no user input.
+    """
+    fragments: list[str] = []
+    params: dict[str, object] = {}
+    if filters.mime_type is not None:
+        fragments.append(" AND d.mime_type = :mime_type")
+        params["mime_type"] = filters.mime_type
+    if filters.date_from is not None or filters.date_to is not None:
+        fragments.append(_DATE_FILTER)
+        params["date_from"] = filters.date_from or "0001-01-01"
+        params["date_to"] = filters.date_to or "9999-12-31"
+    return "".join(fragments), params
+
+
 # A document that failed mid-embed can retain committed chunks with
 # non-NULL embeddings (the embed task commits partial progress for
 # idempotent retry), so searchability is gated on document status, not
 # on embedding presence alone.
-_VECTOR_SQL = text(
-    """
-    SELECT c.id AS chunk_id, c.text, c.document_id, d.title, d.mime_type
-    FROM chunks c
-    JOIN documents d ON d.id = c.document_id
-    WHERE c.org_id = :org_id AND d.status = 'indexed' AND c.embedding IS NOT NULL
-    ORDER BY c.embedding <=> CAST(:query_vec AS vector)
-    LIMIT :pool
-    """,
-)
+def _vector_sql(filter_clause: str) -> TextClause:
+    # filter_clause is composed only of fixed fragments in _filter_clause;
+    # all user values travel as bind parameters, so no user input is spliced.
+    return text(
+        "SELECT c.id AS chunk_id, c.text, c.document_id, d.title, d.mime_type"  # noqa: S608
+        " FROM chunks c JOIN documents d ON d.id = c.document_id"
+        " WHERE c.org_id = :org_id AND d.status = 'indexed' AND c.embedding IS NOT NULL"
+        f"{filter_clause}"
+        " ORDER BY c.embedding <=> CAST(:query_vec AS vector) LIMIT :pool",
+    )
 
-_BM25_SQL = text(
-    """
-    SELECT c.id AS chunk_id, c.text, c.document_id, d.title, d.mime_type,
-           paradedb.score(c.id) AS score
-    FROM chunks c
-    JOIN documents d ON d.id = c.document_id
-    WHERE c.org_id = :org_id AND d.status = 'indexed' AND c.text @@@ :query
-    ORDER BY score DESC
-    LIMIT :pool
-    """,
-)
+
+def _bm25_sql(filter_clause: str) -> TextClause:
+    return text(
+        "SELECT c.id AS chunk_id, c.text, c.document_id, d.title, d.mime_type,"  # noqa: S608
+        " paradedb.score(c.id) AS score"
+        " FROM chunks c JOIN documents d ON d.id = c.document_id"
+        " WHERE c.org_id = :org_id AND d.status = 'indexed' AND c.text @@@ :query"
+        f"{filter_clause}"
+        " ORDER BY score DESC LIMIT :pool",
+    )
 
 
 def fuse_rrf(
@@ -119,8 +166,10 @@ async def run_search(  # noqa: PLR0913 — pipeline inputs; grouping into an obj
     embedder: Embedder,
     reranker: Reranker,
     settings: Settings,
+    filters: SearchFilters | None = None,
 ) -> SearchOutcome:
     """Run the hybrid pipeline for ``query`` inside the org-scoped session."""
+    filters = filters or SearchFilters()
     batch = await embedder.embed([query], task=EmbeddingTask.QUERY)
     query_vec = "[" + ",".join(str(v) for v in batch.vectors[0]) + "]"
 
@@ -133,12 +182,13 @@ async def run_search(  # noqa: PLR0913 — pipeline inputs; grouping into an obj
         ),
     )
 
+    filter_clause, filter_params = _filter_clause(filters)
     pool = settings.search_candidate_pool
     vector_rows: Sequence[RowMapping] = (
         (
             await session.execute(
-                _VECTOR_SQL,
-                {"org_id": org_id, "query_vec": query_vec, "pool": pool},
+                _vector_sql(filter_clause),
+                {"org_id": org_id, "query_vec": query_vec, "pool": pool, **filter_params},
             )
         )
         .mappings()
@@ -152,8 +202,8 @@ async def run_search(  # noqa: PLR0913 — pipeline inputs; grouping into an obj
     try:
         async with session.begin_nested():
             with_bm25 = await session.execute(
-                _BM25_SQL,
-                {"org_id": org_id, "query": query, "pool": pool},
+                _bm25_sql(filter_clause),
+                {"org_id": org_id, "query": query, "pool": pool, **filter_params},
             )
             bm25_rows = with_bm25.mappings().all()
     except DBAPIError:

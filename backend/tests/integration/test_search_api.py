@@ -41,17 +41,20 @@ USER_A_EMAIL = "searcher-a@example.com"
 USER_B_EMAIL = "searcher-b@example.com"
 
 
-async def _seed_indexed_document(
+async def _seed_indexed_document(  # noqa: PLR0913 — seed knobs for filter tests
     pool: asyncpg.Pool,
     org_id: uuid.UUID,
     title: str,
     chunk_texts: list[str],
     status: str = "indexed",
+    mime_type: str = "text/markdown",
+    dates: list[str] | None = None,
 ) -> uuid.UUID:
     """Insert a document with embedded chunks, defaulting to ``indexed``.
 
-    ``status`` is overridable so tests can seed a ``failed`` document that
-    still carries embedded chunks (the partial-progress case).
+    ``status``, ``mime_type`` and extracted ``dates`` (ISO strings, written
+    to ``document_metadata``) are overridable so filter tests can seed
+    documents that differ on exactly the filtered dimension.
     """
     embedder = FakeEmbedder(dimensions=get_settings().jina_embedding_dimensions)
     batch = await embedder.embed(chunk_texts, task=EmbeddingTask.PASSAGE)
@@ -63,11 +66,19 @@ async def _seed_indexed_document(
             org_id,
             title,
             f"/seed/{title}",
-            "text/markdown",
+            mime_type,
             100,
             f"hash-{title}-{org_id}",
             status,
         )
+        if dates is not None:
+            await conn.execute(
+                "INSERT INTO document_metadata (org_id, document_id, dates, extractor_version) "
+                "VALUES ($1, $2, $3::jsonb, 'test')",
+                org_id,
+                document_id,
+                json.dumps([{"raw": iso, "iso": iso} for iso in dates]),
+            )
         for index, (chunk_text, vector) in enumerate(
             zip(chunk_texts, batch.vectors, strict=True),
         ):
@@ -201,6 +212,79 @@ async def test_search_empty_result_shape(
     body = response.json()
     assert body["result_count"] == 0
     assert body["results"] == []
+
+
+async def test_mime_type_filter_restricts_results(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """A mime_type filter returns only documents of that type."""
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    org_a = await seed_org(migrations_pool, "org-a", "Org A")
+    await seed_membership(migrations_pool, user_a, org_a)
+    text = ["Styrelsen beslutade om takrenovering och budget."]
+    pdf_doc = await _seed_indexed_document(
+        migrations_pool,
+        org_a,
+        "protokoll.pdf",
+        text,
+        mime_type="application/pdf",
+    )
+    await _seed_indexed_document(
+        migrations_pool,
+        org_a,
+        "notes.md",
+        text,
+        mime_type="text/markdown",
+    )
+
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    response = await app_client.get(
+        "/api/orgs/org-a/search",
+        params={"q": "takrenovering budget", "mime_type": "application/pdf"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    ids = [r["document_id"] for r in body["results"]]
+    assert ids == [str(pdf_doc)]
+
+
+async def test_date_range_filter_restricts_results(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """A date range returns only documents with an extracted date in range."""
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    org_a = await seed_org(migrations_pool, "org-a", "Org A")
+    await seed_membership(migrations_pool, user_a, org_a)
+    text = ["Föreningens ekonomi och budget för året."]
+    doc_2022 = await _seed_indexed_document(
+        migrations_pool,
+        org_a,
+        "budget-2022.md",
+        text,
+        dates=["2022-03-15"],
+    )
+    await _seed_indexed_document(
+        migrations_pool,
+        org_a,
+        "budget-2023.md",
+        text,
+        dates=["2023-06-01"],
+    )
+
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    response = await app_client.get(
+        "/api/orgs/org-a/search",
+        params={
+            "q": "ekonomi budget",
+            "date_from": "2022-01-01",
+            "date_to": "2022-12-31",
+        },
+    )
+    assert response.status_code == 200, response.text
+    ids = [r["document_id"] for r in response.json()["results"]]
+    assert ids == [str(doc_2022)]
 
 
 async def test_failed_document_with_embedded_chunks_is_not_searchable(
