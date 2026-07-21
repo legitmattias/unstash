@@ -148,6 +148,46 @@ jobs:
             'curl -sf http://localhost:8010/api/ready || (echo "API readiness check failed" && exit 1)'
           echo "Staging deploy complete."
 
+  # ── End-to-end smoke against staging (login → search → click) ──────────
+  # Runs after the staging deploy. No-ops cleanly until SMOKE_EMAIL /
+  # SMOKE_PASSWORD are set as staging-environment secrets.
+  e2e-staging:
+    needs: deploy-staging
+    runs-on: ubuntu-24.04
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check smoke credentials are configured
+        id: creds
+        env:
+          SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
+        run: echo "present=${SMOKE_EMAIL:+true}" >> "$GITHUB_OUTPUT"
+
+      - if: steps.creds.outputs.present == 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - if: steps.creds.outputs.present == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Run e2e smoke against staging
+        if: steps.creds.outputs.present == 'true'
+        working-directory: frontend
+        env:
+          SMOKE_BASE_URL: https://staging.unstash.mattic.dev
+          SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
+          SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+          pnpm e2e
+
   # ── Deploy to production (auto on push to main) ──────────
   deploy-production:
     needs: build-and-push

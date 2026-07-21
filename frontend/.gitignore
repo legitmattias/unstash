@@ -22,3 +22,8 @@ pnpm-debug.log*
 # The repo-root .gitignore has a broad "lib/" rule that also matches this
 # app's source directory; re-include it.
 !app/lib/
+
+# Playwright
+/test-results/
+/playwright-report/
+/playwright/.cache/
