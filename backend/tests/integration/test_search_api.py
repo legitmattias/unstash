@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from structlog.testing import capture_logs
 
 from tests.integration.conftest import (
     TEST_ADMIN_PASSWORD,
@@ -478,3 +479,37 @@ async def test_click_cannot_cross_orgs(
             uuid.UUID(search_id),
         )
     assert clicked is None
+
+
+async def test_search_emits_a_stage_trace(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """A search logs a structured per-stage trace with timings and counts."""
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    org_a = await seed_org(migrations_pool, "org-a", "Org A")
+    await seed_membership(migrations_pool, user_a, org_a)
+    await _seed_indexed_document(
+        migrations_pool,
+        org_a,
+        "protokoll.md",
+        ["Styrelsen beslutade att anlita en entreprenor for takrenoveringen."],
+    )
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
+
+    with capture_logs() as logs:
+        response = await app_client.get(
+            "/api/orgs/org-a/search",
+            params={"q": "takrenoveringen"},
+        )
+    assert response.status_code == 200, response.text
+
+    trace = next(entry for entry in logs if entry.get("event") == "search_trace")
+    assert trace["result_count"] >= 1
+    assert trace["query_length"] == len("takrenoveringen")
+    assert trace["bm25_used"] is True
+    for key in ("embed_ms", "vector_ms", "bm25_ms", "fuse_ms", "rerank_ms", "total_ms"):
+        assert isinstance(trace[key], (int, float))
+        assert trace[key] >= 0
+    # The raw query is never logged — only its length.
+    assert "query" not in trace

@@ -13,6 +13,7 @@ vector order for the request.
 
 from __future__ import annotations
 
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -191,7 +192,12 @@ def fuse_rrf(
     return scores
 
 
-async def run_search(  # noqa: PLR0913 — pipeline inputs; grouping into an object buys nothing
+def _ms_since(start: float) -> float:
+    """Milliseconds elapsed since a ``time.perf_counter()`` mark."""
+    return round((time.perf_counter() - start) * 1000, 2)
+
+
+async def run_search(  # noqa: PLR0913, PLR0915 — a linear pipeline with per-stage timing
     session: AsyncSession,
     *,
     org_id: uuid.UUID,
@@ -202,8 +208,11 @@ async def run_search(  # noqa: PLR0913 — pipeline inputs; grouping into an obj
     filters: SearchFilters | None = None,
 ) -> SearchOutcome:
     """Run the hybrid pipeline for ``query`` inside the org-scoped session."""
+    started = time.perf_counter()
     filters = filters or SearchFilters()
+    embed_start = time.perf_counter()
     batch = await embedder.embed([query], task=EmbeddingTask.QUERY)
+    embed_ms = _ms_since(embed_start)
     query_vec = "[" + ",".join(str(v) for v in batch.vectors[0]) + "]"
 
     # Bound retrieval so a pathological BM25 query (wildcards, large fuzzy
@@ -217,6 +226,7 @@ async def run_search(  # noqa: PLR0913 — pipeline inputs; grouping into an obj
 
     filter_clause, filter_params = _filter_clause(filters)
     pool = settings.search_candidate_pool
+    vector_start = time.perf_counter()
     vector_rows: Sequence[RowMapping] = (
         (
             await session.execute(
@@ -227,11 +237,13 @@ async def run_search(  # noqa: PLR0913 — pipeline inputs; grouping into an obj
         .mappings()
         .all()
     )
+    vector_ms = _ms_since(vector_start)
 
     # The savepoint keeps a BM25 parse failure from aborting the enclosing
     # transaction, which still has the search_logs insert ahead of it.
     bm25_used = True
     bm25_rows: Sequence[RowMapping]
+    bm25_start = time.perf_counter()
     try:
         async with session.begin_nested():
             with_bm25 = await session.execute(
@@ -243,7 +255,9 @@ async def run_search(  # noqa: PLR0913 — pipeline inputs; grouping into an obj
         logger.warning("bm25_leg_failed", query_length=len(query))
         bm25_used = False
         bm25_rows = []
+    bm25_ms = _ms_since(bm25_start)
 
+    fuse_start = time.perf_counter()
     chunk_info: dict[uuid.UUID, RowMapping] = {
         row["chunk_id"]: row for rows in (vector_rows, bm25_rows) for row in rows
     }
@@ -274,10 +288,14 @@ async def run_search(  # noqa: PLR0913 — pipeline inputs; grouping into an obj
             ),
         )
 
+    fuse_ms = _ms_since(fuse_start)
+
     limit = settings.search_result_limit
     to_rerank = candidates[: settings.search_rerank_candidates]
+    rerank_candidates = len(to_rerank)
     rerank_scores: list[float | None] = [None] * len(to_rerank)
     reranked = False
+    rerank_start = time.perf_counter()
     if to_rerank:
         try:
             result = await reranker.rerank(query, [c.excerpt for c in to_rerank])
@@ -287,6 +305,7 @@ async def run_search(  # noqa: PLR0913 — pipeline inputs; grouping into an obj
             to_rerank = [to_rerank[i] for i in result.order]
             rerank_scores = list(result.scores)
             reranked = True
+    rerank_ms = _ms_since(rerank_start)
 
     hits = [
         SearchHit(
@@ -301,4 +320,26 @@ async def run_search(  # noqa: PLR0913 — pipeline inputs; grouping into an obj
         )
         for i, c in enumerate(to_rerank[:limit])
     ]
+
+    # Per-stage trace for observability (Loki). The query text is not logged —
+    # only its length — since it can carry sensitive content; search_logs holds
+    # the query itself under org-scoped RLS.
+    logger.info(
+        "search_trace",
+        query_length=len(query),
+        filtered=filters.any,
+        vector_candidates=len(vector_rows),
+        bm25_candidates=len(bm25_rows),
+        bm25_used=bm25_used,
+        documents=len(candidates),
+        rerank_candidates=rerank_candidates,
+        reranked=reranked,
+        result_count=len(hits),
+        embed_ms=embed_ms,
+        vector_ms=vector_ms,
+        bm25_ms=bm25_ms,
+        fuse_ms=fuse_ms,
+        rerank_ms=rerank_ms,
+        total_ms=_ms_since(started),
+    )
     return SearchOutcome(hits=hits, reranked=reranked, bm25_used=bm25_used)
