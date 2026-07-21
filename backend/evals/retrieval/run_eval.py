@@ -265,7 +265,12 @@ def _stats_lines(
     return lines
 
 
-async def run(embedder_kind: str, report_path: str | None, bm25_tokenizer: str = "icu") -> None:
+async def run(
+    embedder_kind: str,
+    report_path: str | None,
+    bm25_tokenizer: str = "icu",
+    json_path: str | None = None,
+) -> None:
     from eval_db import fresh_database
 
     from unstash.documents.embedder import EmbeddingTask
@@ -332,6 +337,15 @@ async def run(embedder_kind: str, report_path: str | None, bm25_tokenizer: str =
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(report + "\n")
         print(f"\nwritten to {out}")
+    if json_path:
+        aggregated = {
+            config: {metric: sum(vals) / len(vals) for metric, vals in metrics.items() if vals}
+            for config, metrics in per_config.items()
+        }
+        out = HERE / json_path
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(aggregated, indent=2, sort_keys=True) + "\n")
+        print(f"metrics json written to {out}")
 
 
 if __name__ == "__main__":
@@ -340,8 +354,9 @@ if __name__ == "__main__":
     parser.add_argument("--report", default=None)
     parser.add_argument("--bm25", choices=["icu", "swedish"], default="icu")
     parser.add_argument("--sweep-fusion", action="store_true")
+    parser.add_argument("--json", default=None, help="write aggregated metrics as JSON")
     args = parser.parse_args()
     if args.sweep_fusion:
         asyncio.run(sweep_fusion(args.embedder, args.report))
     else:
-        asyncio.run(run(args.embedder, args.report, args.bm25))
+        asyncio.run(run(args.embedder, args.report, args.bm25, args.json))

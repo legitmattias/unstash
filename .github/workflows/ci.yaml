@@ -333,6 +333,48 @@ jobs:
         run: uv run pytest tests/integration --no-cov
 
   # ---------------------------------------------------------------------------
+  # Retrieval eval gate: deterministic nDCG regression check against a pinned
+  # baseline. Fake embedder (no API), so it catches pipeline regressions
+  # (BM25 / fusion / reduction) — embedding quality is the separate live tier.
+  # ---------------------------------------------------------------------------
+  eval-gate:
+    name: Retrieval eval gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build postgres image (required by testcontainers fixture)
+        run: docker build -f docker/postgres.Dockerfile -t unstash-postgres:ci .
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.16"
+          enable-cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: Cache Docling + tokenizer models
+        uses: actions/cache@v4
+        with:
+          path: /tmp/unstash-test-hf-cache
+          key: docling-models-${{ hashFiles('backend/uv.lock') }}
+          restore-keys: |
+            docling-models-
+
+      - name: Run deterministic eval gate
+        working-directory: backend/evals/retrieval
+        env:
+          HF_HOME: /tmp/unstash-test-hf-cache
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: uv run python eval_gate.py
+
+  # ---------------------------------------------------------------------------
   # Security: secrets scanning
   # ---------------------------------------------------------------------------
   security-scan:
