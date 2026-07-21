@@ -3277,6 +3277,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "reportlab" },
     { name = "ruff" },
+    { name = "scipy" },
     { name = "testcontainers" },
 ]
 
@@ -3313,6 +3314,7 @@ dev = [
     { name = "pytest-cov", specifier = ">=5.0.0" },
     { name = "reportlab", specifier = ">=4.0.0" },
     { name = "ruff", specifier = ">=0.7.0" },
+    { name = "scipy", specifier = ">=1.14.0" },
     { name = "testcontainers", extras = ["postgres"], specifier = ">=4.7.0" },
 ]
 

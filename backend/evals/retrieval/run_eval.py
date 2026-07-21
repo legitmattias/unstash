@@ -33,7 +33,7 @@ sys.path.insert(0, str(HERE.parents[1] / "src"))
 import asyncpg
 from metrics import (
     clustered_bootstrap_ci,
-    clustered_permutation_pvalue,
+    clustered_paired_test,
     mrr,
     ndcg_at_k,
     recall_at_k,
@@ -228,11 +228,9 @@ def _stats_lines(
     """Paired comparison and per-slice CIs, resampled by source document."""
 
     def paired(a: str, b: str, metric: str) -> str:
-        diffs = [
-            x - y for x, y in zip(per_config[a][metric], per_config[b][metric], strict=True)
-        ]
-        mean, low, high = clustered_bootstrap_ci(diffs, clusters)
-        pvalue = clustered_permutation_pvalue(diffs, clusters)
+        mean, low, high, pvalue = clustered_paired_test(
+            per_config[a][metric], per_config[b][metric], clusters
+        )
         return f"{mean:+.3f}  95% CI [{low:+.3f}, {high:+.3f}]  permutation p={pvalue:.3f}"
 
     lines = [
