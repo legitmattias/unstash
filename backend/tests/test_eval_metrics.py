@@ -77,44 +77,46 @@ def test_clustered_bootstrap_ci_brackets_the_query_level_mean() -> None:
 
 def test_clustered_bootstrap_ci_is_query_level_not_document_mean() -> None:
     # d1 carries three queries, d2 one. Query-level mean (0.7) differs from the
-    # mean of document-means (0.5) — the bug the review caught.
+    # mean of document-means (0.5) — the bug the review caught. Two clusters, so
+    # the interval itself is withheld; only the mean is asserted here.
     values = [0.9, 0.9, 0.9, 0.1]
     clusters = ["d1", "d1", "d1", "d2"]
-    mean, low, high = clustered_bootstrap_ci(values, clusters)
+    mean, low, _high = clustered_bootstrap_ci(values, clusters)
     assert math.isclose(mean, 0.7)
-    assert low <= mean <= high
+    assert math.isnan(low)
 
 
-def test_clustered_bootstrap_ci_degenerate_single_cluster_no_nan() -> None:
+def test_clustered_bootstrap_ci_withholds_interval_below_min_clusters() -> None:
+    # One document is one effective unit; a numeric interval would read as false
+    # certainty (the review's point), so it is withheld as NaN, not [0.5, 0.5].
     mean, low, high = clustered_bootstrap_ci([0.4, 0.6], ["d1", "d1"])
     assert math.isclose(mean, 0.5)
-    # One cluster resamples to itself every time — zero spread, never NaN.
-    assert math.isclose(low, 0.5)
-    assert math.isclose(high, 0.5)
-    assert not math.isnan(low)
-    assert not math.isnan(high)
+    assert math.isnan(low)
+    assert math.isnan(high)
 
 
-def test_clustering_widens_the_interval() -> None:
-    # Within-document correlation (d1 all high, d2 all low) means fewer effective
-    # units than treating each query as independent — so the clustered CI is wider.
-    values = [0.9, 0.9, 0.9, 0.1, 0.1, 0.1]
-    independent = ["a", "b", "c", "d", "e", "f"]
-    clustered = ["d1", "d1", "d1", "d2", "d2", "d2"]
+def test_clustering_strictly_widens_the_interval() -> None:
+    # Same values; grouping perfectly-correlated query pairs into five documents
+    # gives fewer effective units than ten independent queries, so the clustered
+    # interval is strictly wider. Both sides keep >= _MIN_CLUSTERS_FOR_CI clusters.
+    values = [0.9, 0.9, 0.1, 0.1, 0.9, 0.9, 0.1, 0.1, 0.9, 0.1]
+    independent = [f"q{i}" for i in range(10)]
+    clustered = ["a", "a", "b", "b", "c", "c", "d", "d", "e", "e"]
     _, low_i, high_i = clustered_bootstrap_ci(values, independent)
     _, low_c, high_c = clustered_bootstrap_ci(values, clustered)
-    assert (high_c - low_c) >= (high_i - low_i)
+    assert (high_c - low_c) > (high_i - low_i) + 1e-6
 
 
 def test_clustered_paired_test_three_document_permutation_floor() -> None:
     # A consistent +0.1 over three documents: the two-sided permutation p cannot
-    # drop below ~0.25 (2 of 2**3 sign-flips), so it refuses to over-claim.
+    # drop below ~0.25 (2 of 2**3 sign-flips), so it refuses to over-claim. Three
+    # clusters, so the interval is withheld.
     a = [0.8, 0.6, 0.7]
     b = [0.7, 0.5, 0.6]
     clusters = ["d1", "d2", "d3"]
-    mean, low, high, p = clustered_paired_test(a, b, clusters)
+    mean, low, _high, p = clustered_paired_test(a, b, clusters)
     assert math.isclose(mean, 0.1, abs_tol=1e-9)
-    assert low <= mean <= high
+    assert math.isnan(low)
     assert p == pytest.approx(0.25, abs=0.01)
 
 
@@ -124,3 +126,19 @@ def test_clustered_paired_test_pvalue_in_unit_interval() -> None:
     clusters = ["d1", "d2", "d3", "d4"]
     _, _, _, p = clustered_paired_test(a, b, clusters)
     assert 0.0 < p <= 1.0
+
+
+def test_clustered_paired_test_statistic_is_query_weighted() -> None:
+    # d1 carries three queries (+0.4 each), four singletons carry +0.1. The mean
+    # and the size-weighted permutation statistic both equal the query-level mean
+    # difference, not the unweighted mean of document-means (which would be far
+    # smaller). Five documents, so the interval is reported and, being uniformly
+    # positive, the p-value is small rather than the near-1.0 the unweighted
+    # statistic produced.
+    a = [0.9, 0.9, 0.9, 0.6, 0.6, 0.6, 0.6]
+    b = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+    clusters = ["d1", "d1", "d1", "d2", "d3", "d4", "d5"]
+    mean, low, _high, p = clustered_paired_test(a, b, clusters)
+    assert math.isclose(mean, (0.4 * 3 + 0.1 * 4) / 7, abs_tol=1e-9)
+    assert not math.isnan(low)
+    assert 0.0 < p < 0.2

@@ -25,6 +25,11 @@ RELEVANT_GRADE = 2
 _BOOTSTRAP_REPLICATES = 10_000
 _PERMUTATIONS = 10_000
 _CONFIDENCE = 0.95
+# Below this many distinct documents the percentile bootstrap is too coarse to
+# trust: a single cluster yields a zero-width interval that reads as false
+# certainty. Withhold the interval instead (NaN sentinel), reported as "not
+# reported". Applies per slice — the english slice carries only 4 clusters.
+_MIN_CLUSTERS_FOR_CI = 5
 
 
 def recall_at_k(ranked: list[str], judgments: dict[str, int], k: int) -> float:
@@ -84,11 +89,16 @@ def clustered_bootstrap_ci(
     the reported figure, not a mean of document-means. The percentile method is
     used rather than BCa: with the 4-9 clusters a slice carries, BCa's
     bias-correction and acceleration are unreliable (and can return NaN).
-    Returns ``(mean, low, high)`` at the ``_CONFIDENCE`` level.
+    Below ``_MIN_CLUSTERS_FOR_CI`` documents the interval is withheld as
+    ``(mean, nan, nan)`` rather than a falsely-precise number. Returns
+    ``(mean, low, high)`` at the ``_CONFIDENCE`` level.
     """
     groups = _grouped(values, clusters)
     if not groups:
         raise ValueError("cannot bootstrap an empty sample")
+    mean = float(np.mean(values))
+    if len(groups) < _MIN_CLUSTERS_FOR_CI:
+        return mean, math.nan, math.nan
     sums = np.array([sum(group) for group in groups])
     sizes = np.array([len(group) for group in groups])
     rng = np.random.default_rng(seed)
@@ -96,7 +106,7 @@ def clustered_bootstrap_ci(
     replicate_means = sums[picks].sum(axis=1) / sizes[picks].sum(axis=1)
     tail = (1.0 - _CONFIDENCE) / 2.0
     low, high = np.percentile(replicate_means, [tail * 100.0, (1.0 - tail) * 100.0])
-    return float(np.mean(values)), float(low), float(high)
+    return mean, float(low), float(high)
 
 
 def clustered_paired_test(
@@ -112,7 +122,9 @@ def clustered_paired_test(
     over the per-query differences. The p-value comes from
     ``scipy.stats.permutation_test`` sign-flipping whole documents
     (``permutation_type="samples"``) over the per-document mean scores — the
-    document is the exchangeable unit under the null. Returns
+    document is the exchangeable unit under the null. The statistic is weighted
+    by document size, so it equals the same query-level mean difference the CI
+    describes rather than an unweighted mean of document-means. Returns
     ``(mean_diff, low, high, p_value)``.
     """
     diffs = [a - b for a, b in zip(a_scores, b_scores, strict=True)]
@@ -125,11 +137,13 @@ def clustered_paired_test(
         b_by_doc[cluster].append(b)
     a_means = np.array([float(np.mean(a_by_doc[key])) for key in a_by_doc])
     b_means = np.array([float(np.mean(b_by_doc[key])) for key in a_by_doc])
+    sizes = np.array([len(a_by_doc[key]) for key in a_by_doc])
     p_value = stats.permutation_test(
         (a_means, b_means),
-        lambda x, y: float(np.mean(x - y)),
+        lambda x, y: float(np.average(x - y, weights=sizes)),
         permutation_type="samples",
         n_resamples=_PERMUTATIONS,
         rng=seed,
+        vectorized=False,
     ).pvalue
     return mean, low, high, float(p_value)

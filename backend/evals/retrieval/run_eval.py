@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import os
 import sys
 from collections import defaultdict
@@ -227,16 +228,18 @@ def _stats_lines(
     no_answer_count: int,
 ) -> list[str]:
     """Paired comparison and per-slice CIs, resampled by source document."""
+    n_clusters_all = len(set(clusters))
 
     def paired(a: str, b: str, metric: str) -> str:
         mean, low, high, pvalue = clustered_paired_test(
             per_config[a][metric], per_config[b][metric], clusters
         )
-        return f"{mean:+.3f}  95% CI [{low:+.3f}, {high:+.3f}]  permutation p={pvalue:.3f}"
+        ci = "interval not reported" if math.isnan(low) else f"95% CI [{low:+.3f}, {high:+.3f}]"
+        return f"{mean:+.3f}  {ci}  permutation p={pvalue:.3f}"
 
     lines = [
         "",
-        "## Paired comparison — all/ndcg@10 (resampled by source document)",
+        f"## Paired comparison — all/ndcg@10 ({n_clusters_all} source documents)",
         "",
         f"- rrf vs vector: {paired('rrf', 'vector', 'all/ndcg@10')}",
         f"- rrf vs bm25:   {paired('rrf', 'bm25', 'all/ndcg@10')}",
@@ -247,8 +250,12 @@ def _stats_lines(
     for cat in sorted(set(categories)):
         idx = [i for i, category in enumerate(categories) if category == cat]
         vals = [per_config["rrf"]["all/ndcg@10"][i] for i in idx]
-        mean, low, high = clustered_bootstrap_ci(vals, [clusters[i] for i in idx])
-        lines.append(f"- {cat} (n={len(vals)}): {mean:.3f} [{low:.3f}, {high:.3f}]")
+        slice_clusters = [clusters[i] for i in idx]
+        mean, low, high = clustered_bootstrap_ci(vals, slice_clusters)
+        ci = "interval not reported" if math.isnan(low) else f"[{low:.3f}, {high:.3f}]"
+        lines.append(
+            f"- {cat} (n={len(vals)}, {len(set(slice_clusters))} clusters): {mean:.3f} {ci}"
+        )
     lines += [
         "",
         f"_{no_answer_count} no_answer queries are authored but excluded from ranking "
