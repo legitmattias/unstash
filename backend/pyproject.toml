@@ -54,6 +54,9 @@ dev = [
     "pyright>=1.1.384",
     "testcontainers[postgres]>=4.7.0",
     "reportlab>=4.0.0",
+    # Eval-harness statistics (bootstrap CIs, permutation tests). Dev/CI only —
+    # not a runtime dependency, so it stays out of the production image.
+    "scipy>=1.14.0",
 ]
 
 [build-system]
@@ -139,6 +142,7 @@ ignore = [
     "TC001",   # runtime imports (numpy, asyncpg) are used at runtime
     "TC002",
     "TC003",
+    "S311",    # random is for statistical resampling, not cryptography
 ]
 # SQLAlchemy 2.0 resolves Mapped[T] annotations at class-creation time via
 # typing.get_type_hints, so types referenced in Mapped[...] must be importable

@@ -31,7 +31,13 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parents[1] / "src"))
 
 import asyncpg
-from metrics import mrr, ndcg_at_k, recall_at_k
+from metrics import (
+    clustered_bootstrap_ci,
+    clustered_paired_test,
+    mrr,
+    ndcg_at_k,
+    recall_at_k,
+)
 
 # Adopted production fusion settings (mirror config.py search_rrf_k /
 # search_vector_weight) so a re-run's ``rrf`` config is comparable to
@@ -203,12 +209,62 @@ SWEDISH_BM25_INDEX = (
 )
 
 
+def _primary_doc(query: dict) -> str:
+    """Cluster key: the query's highest-graded relevant document.
+
+    Queries answering to the same document (e.g. the roof cluster) share a
+    key, so the bootstrap treats them as one dependent group rather than as
+    independent observations.
+    """
+    return max(query["relevant"], key=lambda rel: rel["grade"])["doc"]
+
+
+def _stats_lines(
+    per_config: dict[str, dict[str, list[float]]],
+    categories: list[str],
+    clusters: list[str],
+    no_answer_count: int,
+) -> list[str]:
+    """Paired comparison and per-slice CIs, resampled by source document."""
+
+    def paired(a: str, b: str, metric: str) -> str:
+        mean, low, high, pvalue = clustered_paired_test(
+            per_config[a][metric], per_config[b][metric], clusters
+        )
+        return f"{mean:+.3f}  95% CI [{low:+.3f}, {high:+.3f}]  permutation p={pvalue:.3f}"
+
+    lines = [
+        "",
+        "## Paired comparison — all/ndcg@10 (resampled by source document)",
+        "",
+        f"- rrf vs vector: {paired('rrf', 'vector', 'all/ndcg@10')}",
+        f"- rrf vs bm25:   {paired('rrf', 'bm25', 'all/ndcg@10')}",
+        "",
+        "## Per-slice ndcg@10, rrf — mean with 95% CI (clustered)",
+        "",
+    ]
+    for cat in sorted(set(categories)):
+        idx = [i for i, category in enumerate(categories) if category == cat]
+        vals = [per_config["rrf"]["all/ndcg@10"][i] for i in idx]
+        mean, low, high = clustered_bootstrap_ci(vals, [clusters[i] for i in idx])
+        lines.append(f"- {cat} (n={len(vals)}): {mean:.3f} [{low:.3f}, {high:.3f}]")
+    lines += [
+        "",
+        f"_{no_answer_count} no_answer queries are authored but excluded from ranking "
+        "metrics (undefined on an empty judgment set). The refusal path is a "
+        "retrieval-correctness property tracked separately — not reflected above._",
+    ]
+    return lines
+
+
 async def run(embedder_kind: str, report_path: str | None, bm25_tokenizer: str = "icu") -> None:
     from eval_db import fresh_database
 
     from unstash.documents.embedder import EmbeddingTask
 
-    golden = [q for q in load_golden() if q["category"] != "no_answer"]
+    all_golden = load_golden()
+    golden = [q for q in all_golden if q["category"] != "no_answer"]
+    no_answer = [q for q in all_golden if q["category"] == "no_answer"]
     embedder = build_embedder(embedder_kind)
 
     async with fresh_database() as pool:
@@ -221,8 +277,14 @@ async def run(embedder_kind: str, report_path: str | None, bm25_tokenizer: str =
         per_config: dict[str, dict[str, list[float]]] = {
             name: defaultdict(list) for name in ("vector", "bm25", "rrf")
         }
+        # Per-query cluster keys (source document), aligned with the score
+        # lists, so the bootstrap resamples documents rather than queries.
+        categories: list[str] = []
+        clusters: list[str] = []
         for q in golden:
             judgments = {rel["doc"]: rel["grade"] for rel in q["relevant"]}
+            categories.append(q["category"])
+            clusters.append(_primary_doc(q))
             qvec_batch = await embedder.embed([q["query"]], task=EmbeddingTask.QUERY)
             qvec = "[" + ",".join(str(v) for v in qvec_batch.vectors[0]) + "]"
 
@@ -253,6 +315,8 @@ async def run(embedder_kind: str, report_path: str | None, bm25_tokenizer: str =
             for c in per_config
         ]
         lines.append(f"| {key} | " + " | ".join(row) + " |")
+    lines += _stats_lines(per_config, categories, clusters, len(no_answer))
+
     report = "\n".join(lines)
     print("\n" + report)
     if report_path:
