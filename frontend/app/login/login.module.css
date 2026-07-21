@@ -1,0 +1,97 @@
+.wrap {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+.card {
+  width: 100%;
+  max-width: 22rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  padding: 2rem 1.75rem;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 18px 40px -24px rgb(0 0 0 / 0.28);
+}
+
+.brand {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -0.01em;
+}
+
+.title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0.25rem 0 0;
+}
+
+.subtitle {
+  margin: 0 0 0.5rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.input {
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-field);
+  padding: 0.6rem 0.7rem;
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+.submit {
+  margin-top: 0.5rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--surface-raised);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-field);
+  padding: 0.65rem 1rem;
+  cursor: pointer;
+}
+
+.submit:hover {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+}
+
+.submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.error {
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius-field);
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  font-size: 0.85rem;
+}

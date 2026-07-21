@@ -38,8 +38,9 @@ services:
       - "127.0.0.1:3510:3000"
     environment:
       NODE_ENV: production
-      ORIGIN: ${ORIGIN:?ORIGIN must be set (e.g., https://staging.example.com)}
-      BODY_SIZE_LIMIT: "10M"
+      # Server-side (RSC / route handlers) reach the API over the internal
+      # network; browser /api calls go through Caddy.
+      API_INTERNAL_ORIGIN: http://api:8000
     restart: unless-stopped
     deploy:
       resources:

@@ -1,0 +1,96 @@
+.header {
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.inner {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 0.75rem 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.brand {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -0.01em;
+}
+
+.org {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+}
+
+.actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.langs {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.lang {
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  background: var(--surface-raised);
+  border: none;
+  padding: 0.3rem 0.5rem;
+  cursor: pointer;
+}
+
+.lang + .lang {
+  border-left: 1px solid var(--line-strong);
+}
+
+.lang[aria-pressed="true"] {
+  color: var(--surface-raised);
+  background: var(--accent);
+}
+
+.icon,
+.signout {
+  font: inherit;
+  cursor: pointer;
+  color: var(--ink);
+  background: var(--surface-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+}
+
+.icon {
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+}
+
+.iconPlaceholder {
+  width: 17px;
+  height: 17px;
+}
+
+.signout {
+  font-size: 0.82rem;
+  padding: 0.35rem 0.7rem;
+}
+
+.icon:hover,
+.signout:hover {
+  border-color: var(--muted);
+}

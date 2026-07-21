@@ -1,56 +1,69 @@
 # ---------------------------------------------------------------------------
-# Stage: builder — install dependencies and build
+# Stage: deps — install dependencies (cached on lockfile)
 # ---------------------------------------------------------------------------
-FROM node:22-slim AS builder
+FROM node:24-slim AS deps
 
-ENV CI=true
 RUN corepack enable pnpm
-
 WORKDIR /app
 
-# Install dependencies first (layer caching).
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
-# Copy source and build.
-COPY frontend/ ./
-RUN pnpm run build
+# ---------------------------------------------------------------------------
+# Stage: builder — produce the standalone server
+# ---------------------------------------------------------------------------
+FROM node:24-slim AS builder
 
-# Prune to production dependencies only.
-RUN pnpm install --frozen-lockfile --prod
+RUN corepack enable pnpm
+WORKDIR /app
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY frontend/ ./
+RUN pnpm build
 
 # ---------------------------------------------------------------------------
 # Stage: dev — local development with hot reload
 # ---------------------------------------------------------------------------
-FROM builder AS dev
+FROM node:24-slim AS dev
 
-# Reinstall all dependencies (including devDependencies) for dev.
-RUN pnpm install --frozen-lockfile
+RUN corepack enable pnpm
+WORKDIR /app
 
-EXPOSE 5173
-CMD ["pnpm", "run", "dev", "--host", "0.0.0.0"]
+ENV NEXT_TELEMETRY_DISABLED=1
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY frontend/ ./
+
+EXPOSE 3000
+CMD ["pnpm", "dev", "--hostname", "0.0.0.0"]
 
 # ---------------------------------------------------------------------------
-# Stage: runtime — minimal production image
+# Stage: runtime — minimal standalone server
 # ---------------------------------------------------------------------------
-FROM node:22-slim AS runtime
-
-RUN groupadd --system unstash && \
-    useradd --system --gid unstash --home-dir /app --no-create-home unstash
+FROM node:24-slim AS runtime
 
 WORKDIR /app
 
-COPY --from=builder /app/build ./build
-COPY --from=builder /app/package.json ./
-COPY --from=builder /app/node_modules ./node_modules
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
 
-ENV NODE_ENV=production
+RUN groupadd --system --gid 1001 nodejs && \
+    useradd --system --uid 1001 --gid nodejs nextjs
 
-USER unstash
+# The standalone output carries its own trimmed node_modules and server.js;
+# static assets and the public dir are copied alongside it.
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+USER nextjs
 
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["node", "-e", "const h=require('http');h.get('http://localhost:3000',(r)=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
+    CMD ["node", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 
-CMD ["node", "build"]
+CMD ["node", "server.js"]

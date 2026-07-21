@@ -11,7 +11,7 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.13"
-  NODE_VERSION: "22"
+  NODE_VERSION: "24"
   UV_SYSTEM_PYTHON: 1
 
 jobs:
@@ -104,32 +104,8 @@ jobs:
           path: backend/coverage.xml
 
   # ---------------------------------------------------------------------------
-  # Frontend: check, build
+  # Frontend: build (next build runs the TypeScript type-check and compiles)
   # ---------------------------------------------------------------------------
-  frontend-check:
-    name: Frontend check
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: latest
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Svelte check
-        run: pnpm run check
-
   frontend-build:
     name: Frontend build
     runs-on: ubuntu-latest
@@ -141,7 +117,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: latest
+          version: 10.33.0
 
       - uses: actions/setup-node@v4
         with:

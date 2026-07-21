@@ -33,12 +33,15 @@ services:
       dockerfile: docker/frontend.Dockerfile
       target: dev
     volumes:
-      - ./frontend/src:/app/src:ro
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
     ports:
-      - "127.0.0.1:5174:5173"
+      - "127.0.0.1:3000:3000"
     environment:
       NODE_ENV: development
-    command: ["pnpm", "run", "dev", "--host", "0.0.0.0"]
+      API_INTERNAL_ORIGIN: http://api:8000
+    command: ["pnpm", "dev", "--hostname", "0.0.0.0"]
 
   worker:
     build:
