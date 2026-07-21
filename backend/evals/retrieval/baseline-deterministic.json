@@ -1,0 +1,12 @@
+{
+  "config": "rrf",
+  "embedder": "fake",
+  "runs": 5,
+  "observed_spread": 0.0,
+  "tolerance": 0.01,
+  "metrics": {
+    "all/ndcg@10": 0.1446,
+    "all/recall@10": 0.2883,
+    "all/mrr": 0.1574
+  }
+}
