@@ -33,6 +33,12 @@ if TYPE_CHECKING:
 
 CurrentUserDep = Annotated[User, Depends(current_user_or_token)]
 
+# Sentinel org for user-level requests that carry no org context. It sets
+# app.current_org_id to a valid value so the org-scoped tenant_isolation
+# policy evaluates to false rather than raising on an unset GUC, while the
+# own_memberships_read policy scopes reads to the caller.
+_NIL_ORG_ID = "00000000-0000-0000-0000-000000000000"
+
 
 @dataclass(slots=True)
 class OrgContext:
@@ -40,6 +46,40 @@ class OrgContext:
 
     session: AsyncSession
     org_id: uuid.UUID
+
+
+@dataclass(slots=True)
+class UserContext:
+    """A request-scoped user context for user-level (cross-org) routes."""
+
+    session: AsyncSession
+    user_id: uuid.UUID
+
+
+async def get_user_context(user: CurrentUserDep) -> AsyncIterator[UserContext]:
+    """Yield a session scoped to the caller for user-level routes.
+
+    Opens a transaction and sets ``app.current_user_id`` so the
+    ``own_memberships_read`` policy exposes the caller's membership rows
+    across orgs. ``app.current_org_id`` is set to the nil UUID to keep the
+    org-scoped ``tenant_isolation`` policy from raising on an unset GUC.
+    """
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session, session.begin():
+        await session.execute(
+            text("SELECT set_config('app.current_org_id', :org_id, true)").bindparams(
+                org_id=_NIL_ORG_ID,
+            ),
+        )
+        await session.execute(
+            text("SELECT set_config('app.current_user_id', :user_id, true)").bindparams(
+                user_id=str(user.id),
+            ),
+        )
+        yield UserContext(session=session, user_id=user.id)
+
+
+UserContextDep = Annotated[UserContext, Depends(get_user_context)]
 
 
 async def get_org_context(

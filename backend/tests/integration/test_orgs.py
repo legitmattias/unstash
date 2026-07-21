@@ -175,3 +175,51 @@ async def test_rls_blocks_cross_org_visibility(
     # Sanity: the response is for the Acme membership, not someone
     # else's row leaking in.
     assert body["user_id"] == str(user_a_in_acme)
+
+
+async def test_me_organisations_requires_authentication(app_client: AsyncClient) -> None:
+    """The user-level route rejects unauthenticated callers."""
+    response = await app_client.get("/api/me/organisations")
+    assert response.status_code == 401
+
+
+async def test_me_organisations_lists_all_callers_orgs(
+    app_client: AsyncClient,
+    user_a_in_acme: uuid.UUID,
+    beta_id: uuid.UUID,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """The caller sees every org they belong to, ordered by name, with roles."""
+    await seed_membership(migrations_pool, user_a_in_acme, beta_id, "owner")
+
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    response = await app_client.get("/api/me/organisations")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert [org["slug"] for org in body] == ["acme", "beta"]
+    assert {org["slug"]: org["role"] for org in body} == {"acme": "member", "beta": "owner"}
+
+
+async def test_me_organisations_excludes_other_users_orgs(
+    app_client: AsyncClient,
+    user_a_in_acme: uuid.UUID,
+    beta_id: uuid.UUID,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """Adversarial: the caller never sees another user's memberships.
+
+    User A belongs to Acme only; a second user belongs to Beta. A's
+    listing must contain Acme alone — the own_memberships_read policy
+    scopes rows to the caller across orgs, so Beta's row (a different
+    user) stays invisible even though the query spans orgs.
+    """
+    _ = user_a_in_acme
+    other_user = await seed_user(migrations_pool, "user-b@example.com", USER_PASSWORD)
+    await seed_membership(migrations_pool, other_user, beta_id, "admin")
+
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    response = await app_client.get("/api/me/organisations")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert [org["slug"] for org in body] == ["acme"]
+    assert body[0]["role"] == "member"

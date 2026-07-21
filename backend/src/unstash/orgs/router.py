@@ -5,11 +5,29 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
-from unstash.db.models import OrgMembership
-from unstash.orgs.dependencies import CurrentUserDep, OrgContextDep
-from unstash.orgs.schemas import MembershipRead
+from unstash.db.models import Organisation, OrgMembership
+from unstash.orgs.dependencies import CurrentUserDep, OrgContextDep, UserContextDep
+from unstash.orgs.schemas import MembershipRead, OrgSummary
 
 orgs_router = APIRouter()
+
+
+@orgs_router.get("/me/organisations", response_model=list[OrgSummary])
+async def list_my_organisations(ctx: UserContextDep) -> list[OrgSummary]:
+    """Return every organisation the caller belongs to, with their role.
+
+    Reads ``org_memberships`` under the ``own_memberships_read`` policy,
+    which scopes rows to the caller regardless of org; ``organisations``
+    is global. Ordered by name for a stable picker.
+    """
+    stmt = (
+        select(Organisation.slug, Organisation.name, OrgMembership.role)
+        .join(OrgMembership, OrgMembership.org_id == Organisation.id)
+        .where(OrgMembership.user_id == ctx.user_id)
+        .order_by(Organisation.name)
+    )
+    rows = (await ctx.session.execute(stmt)).all()
+    return [OrgSummary(slug=row.slug, name=row.name, role=row.role) for row in rows]
 
 
 @orgs_router.get(

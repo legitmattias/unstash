@@ -18,3 +18,13 @@ class MembershipRead(BaseModel):
     role: OrgRole
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class OrgSummary(BaseModel):
+    """One organisation the caller belongs to, for routing and the picker."""
+
+    slug: str
+    name: str
+    role: OrgRole
+
+    model_config = ConfigDict(from_attributes=True)
