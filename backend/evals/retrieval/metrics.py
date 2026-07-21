@@ -15,10 +15,13 @@ from scipy import stats
 
 RELEVANT_GRADE = 2
 
-# Statistics via scipy.stats: BCa bootstrap intervals and paired permutation
-# tests, appropriate below a few hundred datapoints where the normal
-# approximation understates uncertainty. Queries sharing a source document are
-# dependent, so scores collapse to one value per document before resampling.
+# Confidence intervals come from a cluster bootstrap and significance from a
+# paired permutation test — below a few hundred datapoints the normal
+# approximation understates uncertainty. The resampling unit is the source
+# document: queries on the same document are dependent, so whole documents are
+# drawn together. Primary-document clustering under-captures that dependence
+# (40 queries map to ~24 clusters, and topic groups couple several documents),
+# so intervals stay slightly narrow — documented, not corrected.
 _BOOTSTRAP_REPLICATES = 10_000
 _PERMUTATIONS = 10_000
 _CONFIDENCE = 0.95
@@ -60,12 +63,12 @@ def ndcg_at_k(ranked: list[str], judgments: dict[str, int], k: int) -> float:
     return dcg_at_k(ranked, judgments, k) / ideal_dcg
 
 
-def _cluster_means(values: list[float], clusters: list[str]) -> np.ndarray:
-    """Collapse per-query values to one mean per source document."""
+def _grouped(values: list[float], clusters: list[str]) -> list[list[float]]:
+    """Group per-query values by source document, preserving membership."""
     grouped: dict[str, list[float]] = defaultdict(list)
     for value, cluster in zip(values, clusters, strict=True):
         grouped[cluster].append(value)
-    return np.array([float(np.mean(group)) for group in grouped.values()])
+    return list(grouped.values())
 
 
 def clustered_bootstrap_ci(
@@ -74,22 +77,26 @@ def clustered_bootstrap_ci(
     *,
     seed: int = 0,
 ) -> tuple[float, float, float]:
-    """BCa bootstrap CI for a mean, with the source document as the unit.
+    """Percentile cluster-bootstrap CI for the query-level mean.
 
-    Scores collapse to one value per document (``clusters``) before
-    ``scipy.stats.bootstrap`` resamples, so queries on the same document are
-    not treated as independent. Returns ``(mean, low, high)`` at 95%.
+    Whole documents are drawn with replacement carrying their queries, and each
+    replicate's mean is over the pooled queries — the same query-level mean as
+    the reported figure, not a mean of document-means. The percentile method is
+    used rather than BCa: with the 4-9 clusters a slice carries, BCa's
+    bias-correction and acceleration are unreliable (and can return NaN).
+    Returns ``(mean, low, high)`` at the ``_CONFIDENCE`` level.
     """
-    per_document = _cluster_means(values, clusters)
-    interval = stats.bootstrap(
-        (per_document,),
-        np.mean,
-        confidence_level=_CONFIDENCE,
-        method="BCa",
-        n_resamples=_BOOTSTRAP_REPLICATES,
-        rng=seed,
-    ).confidence_interval
-    return float(per_document.mean()), float(interval.low), float(interval.high)
+    groups = _grouped(values, clusters)
+    if not groups:
+        raise ValueError("cannot bootstrap an empty sample")
+    sums = np.array([sum(group) for group in groups])
+    sizes = np.array([len(group) for group in groups])
+    rng = np.random.default_rng(seed)
+    picks = rng.integers(0, len(groups), size=(_BOOTSTRAP_REPLICATES, len(groups)))
+    replicate_means = sums[picks].sum(axis=1) / sizes[picks].sum(axis=1)
+    tail = (1.0 - _CONFIDENCE) / 2.0
+    low, high = np.percentile(replicate_means, [tail * 100.0, (1.0 - tail) * 100.0])
+    return float(np.mean(values)), float(low), float(high)
 
 
 def clustered_paired_test(
@@ -99,29 +106,30 @@ def clustered_paired_test(
     *,
     seed: int = 0,
 ) -> tuple[float, float, float, float]:
-    """Paired A-minus-B difference with a BCa CI and a permutation p-value.
+    """Paired A-minus-B difference: cluster-bootstrap CI and permutation p-value.
 
-    Both configs collapse to one value per source document, so the document
-    is the paired unit: ``scipy.stats.permutation_test`` sign-flips whole
-    documents (``permutation_type="samples"``) and the bootstrap resamples
-    them. Returns ``(mean_diff, low, high, p_value)``.
+    The CI is the query-level mean difference from :func:`clustered_bootstrap_ci`
+    over the per-query differences. The p-value comes from
+    ``scipy.stats.permutation_test`` sign-flipping whole documents
+    (``permutation_type="samples"``) over the per-document mean scores — the
+    document is the exchangeable unit under the null. Returns
+    ``(mean_diff, low, high, p_value)``.
     """
-    a = _cluster_means(a_scores, clusters)
-    b = _cluster_means(b_scores, clusters)
-    diff = a - b
-    interval = stats.bootstrap(
-        (diff,),
-        np.mean,
-        confidence_level=_CONFIDENCE,
-        method="BCa",
-        n_resamples=_BOOTSTRAP_REPLICATES,
-        rng=seed,
-    ).confidence_interval
+    diffs = [a - b for a, b in zip(a_scores, b_scores, strict=True)]
+    mean, low, high = clustered_bootstrap_ci(diffs, clusters, seed=seed)
+
+    a_by_doc: dict[str, list[float]] = defaultdict(list)
+    b_by_doc: dict[str, list[float]] = defaultdict(list)
+    for a, b, cluster in zip(a_scores, b_scores, clusters, strict=True):
+        a_by_doc[cluster].append(a)
+        b_by_doc[cluster].append(b)
+    a_means = np.array([float(np.mean(a_by_doc[key])) for key in a_by_doc])
+    b_means = np.array([float(np.mean(b_by_doc[key])) for key in a_by_doc])
     p_value = stats.permutation_test(
-        (a, b),
+        (a_means, b_means),
         lambda x, y: float(np.mean(x - y)),
         permutation_type="samples",
         n_resamples=_PERMUTATIONS,
         rng=seed,
     ).pvalue
-    return float(np.mean(diff)), float(interval.low), float(interval.high), float(p_value)
+    return mean, low, high, float(p_value)

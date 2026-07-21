@@ -214,9 +214,10 @@ def _primary_doc(query: dict) -> str:
 
     Queries answering to the same document (e.g. the roof cluster) share a
     key, so the bootstrap treats them as one dependent group rather than as
-    independent observations.
+    independent observations. Ties break on ``(-grade, doc)`` so the key is
+    stable regardless of the order documents appear in ``relevant``.
     """
-    return max(query["relevant"], key=lambda rel: rel["grade"])["doc"]
+    return min(query["relevant"], key=lambda rel: (-rel["grade"], rel["doc"]))["doc"]
 
 
 def _stats_lines(
