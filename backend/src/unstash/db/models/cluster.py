@@ -72,8 +72,9 @@ class Cluster(Base, TimestampMixin):
     keywords: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
 
     # Documents closest to the cluster centroid, as UUID strings — input for
-    # labeling and the admin overview. A plain list, not FKs: representatives
-    # are a sample, and a deleted document must not invalidate the cluster.
+    # labeling and the admin overview. Stored as plain values with no
+    # foreign-key constraint; a deleted document must not invalidate the
+    # cluster.
     representative_document_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
 
     # Document count at creation. ``documents.cluster_id`` only reflects the

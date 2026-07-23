@@ -2,9 +2,9 @@
 
 A run records what the clustering job saw and produced: how many documents
 went in, how many clusters (and noise documents) came out, the quality
-signals, and the parameters used. The parameter snapshot serves the same
-provenance purpose as ``documents.pipeline_config`` — a later run with
-different parameters is distinguishable from a drifting algorithm.
+signals, and the parameters used. ``params`` snapshots the parameters and
+library versions, in the same provenance role as
+``documents.pipeline_config``.
 
 ``document_count`` at the latest successful run is the reference point for
 the automatic re-cluster trigger (run again when the org's document count
