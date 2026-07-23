@@ -48,7 +48,7 @@ def build_embedder(kind: str):
         sys.exit("JINA_API_KEY is required for --embedder jina")
     return JinaEmbedder(
         api_key=api_key,
-        base_url="https://api.jina.ai",
+        base_url="https://api.jina.ai/v1",
         model="jina-embeddings-v4",
         dimensions=2048,
         timeout=60.0,
