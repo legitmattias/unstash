@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import func, select
 
 from unstash.clustering.schemas import (
+    ClusterDocument,
     ClusterKeyword,
     ClustersResponse,
     ClusterSummary,
@@ -24,6 +25,7 @@ from unstash.db.models import (
     ClusteringRun,
     ClusteringRunStatus,
     ClusteringTrigger,
+    Document,
 )
 from unstash.orgs.dependencies import OrgContextDep
 
@@ -88,6 +90,42 @@ async def list_clusters(ctx: OrgContextDep) -> ClustersResponse:
             for cluster in clusters
         ],
     )
+
+
+@clusters_router.get(
+    "/orgs/{slug}/clusters/{cluster_id}/documents",
+    response_model=list[ClusterDocument],
+)
+async def list_cluster_documents(
+    ctx: OrgContextDep,
+    cluster_id: uuid.UUID,
+) -> list[ClusterDocument]:
+    """List the documents currently assigned to one cluster."""
+    cluster = await ctx.session.get(Cluster, cluster_id)
+    if cluster is None or cluster.org_id != ctx.org_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Cluster not found.",
+        )
+
+    rows = (
+        (
+            await ctx.session.execute(
+                select(Document.id, Document.title, Document.indexed_at)
+                .where(
+                    Document.org_id == ctx.org_id,
+                    Document.cluster_id == cluster_id,
+                )
+                .order_by(Document.title),
+            )
+        )
+        .tuples()
+        .all()
+    )
+    return [
+        ClusterDocument(id=doc_id, title=title, indexed_at=indexed_at)
+        for doc_id, title, indexed_at in rows
+    ]
 
 
 @clusters_router.post(

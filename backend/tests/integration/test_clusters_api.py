@@ -279,3 +279,45 @@ async def test_clusters_not_visible_across_orgs(
     await login(app_client, email_b, USER_PASSWORD)
     response = await app_client.get(f"/api/orgs/{slug_a}/clusters")
     assert response.status_code == 403, response.text
+
+
+async def test_cluster_documents_lists_members(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    org_id, slug, email = await _seed_member(migrations_pool, "members")
+    _, cluster_ids = await _seed_run_with_clusters(migrations_pool, org_id, ["protokoll"])
+    doc = await _seed_document_in_cluster(
+        migrations_pool,
+        org_id,
+        "styrelseprotokoll.md",
+        "Styrelsen beslutade.",
+        cluster_ids[0],
+    )
+    await _seed_document_in_cluster(
+        migrations_pool,
+        org_id,
+        "utanför-kluster.md",
+        "Ingen kategori.",
+        None,
+    )
+
+    await login(app_client, email, USER_PASSWORD)
+    response = await app_client.get(f"/api/orgs/{slug}/clusters/{cluster_ids[0]}/documents")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert [d["id"] for d in body] == [str(doc)]
+    assert body[0]["title"] == "styrelseprotokoll.md"
+
+
+async def test_cluster_documents_cross_org_is_not_found(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    org_a, _, _ = await _seed_member(migrations_pool, "member-a")
+    _, cluster_ids = await _seed_run_with_clusters(migrations_pool, org_a, ["protokoll"])
+    _, slug_b, email_b = await _seed_member(migrations_pool, "member-b")
+
+    await login(app_client, email_b, USER_PASSWORD)
+    response = await app_client.get(f"/api/orgs/{slug_b}/clusters/{cluster_ids[0]}/documents")
+    assert response.status_code == 404, response.text

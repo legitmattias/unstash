@@ -42,6 +42,12 @@ export interface ClusterSummary {
   readonly representative_document_ids: readonly string[];
 }
 
+export interface ClusterDocument {
+  readonly id: string;
+  readonly title: string;
+  readonly indexed_at: string | null;
+}
+
 export interface ClustersResponse {
   readonly run_id: string | null;
   readonly run_created_at: string | null;

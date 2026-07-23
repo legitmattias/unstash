@@ -37,6 +37,14 @@ class ClustersResponse(BaseModel):
     clusters: list[ClusterSummary]
 
 
+class ClusterDocument(BaseModel):
+    """One member document of a cluster."""
+
+    id: uuid.UUID
+    title: str
+    indexed_at: datetime | None
+
+
 class ReclusterResponse(BaseModel):
     """Acknowledgement of an enqueued manual clustering run."""
 
