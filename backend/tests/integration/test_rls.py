@@ -25,6 +25,8 @@ TENANT_SCOPED_TABLES: tuple[str, ...] = (
     "job_progress",
     "audit_log",
     "document_metadata",
+    "clustering_runs",
+    "clusters",
 )
 
 

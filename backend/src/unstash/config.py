@@ -178,6 +178,13 @@ class Settings(BaseSettings):
         description="Per-statement timeout (ms) bounding the retrieval queries.",
     )
 
+    # -- Clustering (document-type discovery) -----------------------------------
+    clustering_min_documents: int = Field(
+        default=50,
+        gt=0,
+        description="Indexed documents an org needs before clustering first runs.",
+    )
+
     # -- OCR (scanned PDFs) -----------------------------------------------------
     # 'mistral' sends low-text-density PDFs to the Mistral OCR API;
     # 'off' fails them with an actionable error instead (a scan without

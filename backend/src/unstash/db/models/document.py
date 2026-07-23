@@ -61,6 +61,8 @@ class Document(Base, TimestampMixin):
         Index("ix_documents_org_id_status", "org_id", "status"),
         # Content-hash dedup within an org.
         Index("ix_documents_org_id_content_hash", "org_id", "content_hash"),
+        # Category filter in search: documents of a given cluster for an org.
+        Index("ix_documents_org_id_cluster_id", "org_id", "cluster_id"),
         # Prevents re-importing the same connector resource twice. Partial so
         # manual uploads (connector_id IS NULL) are not constrained.
         Index(
@@ -110,6 +112,14 @@ class Document(Base, TimestampMixin):
     # PII redaction or rebuild eval golden sets without re-ingesting.
     pipeline_version: Mapped[str | None] = mapped_column(Text, nullable=True)
     pipeline_config: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
+    # Assignment from the latest clustering run (see migration 0017). NULL
+    # means not yet clustered, or marked as noise by the algorithm.
+    cluster_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("clusters.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     chunks: Mapped[list[Chunk]] = relationship(
         back_populates="document",
