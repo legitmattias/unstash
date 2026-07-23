@@ -42,6 +42,9 @@ dependencies = [
     # (sources apply only to declared dependencies).
     "torch>=2.13.0",
     "torchvision>=0.28.0",
+    "bertopic>=0.17.4",
+    "numpy>=2.0",
+    "scikit-learn>=1.6",
 ]
 
 [dependency-groups]
@@ -225,6 +228,12 @@ filterwarnings = [
     # KB-BERT ships a slow WordPiece tokenizer; loading it trips a
     # tokenizers deprecation we don't control.
     "ignore:Deprecated in 0.9.0:DeprecationWarning",
+    # umap-learn warns that its optional ParametricUMAP backend is
+    # unavailable without TensorFlow; we don't use it.
+    "ignore:Tensorflow not installed:ImportWarning",
+    # umap-learn forces single-threading when random_state is set and
+    # warns about it; the pinned random_state is deliberate.
+    "ignore:n_jobs value .* overridden to 1 by setting random_state:UserWarning",
 ]
 
 [tool.coverage.run]
