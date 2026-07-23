@@ -54,6 +54,8 @@ async def test_upgrade_head_produces_expected_table_set(
         "api_tokens",
         "audit_log",
         "chunks",
+        "clustering_runs",
+        "clusters",
         "connectors",
         "document_metadata",
         "documents",

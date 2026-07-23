@@ -13,6 +13,12 @@ from unstash.db.models.api_token import ApiToken
 from unstash.db.models.audit_log import AuditLog
 from unstash.db.models.base import Base, TimestampMixin
 from unstash.db.models.chunk import Chunk
+from unstash.db.models.cluster import Cluster, ClusterLabelSource
+from unstash.db.models.clustering_run import (
+    ClusteringRun,
+    ClusteringRunStatus,
+    ClusteringTrigger,
+)
 from unstash.db.models.connector import Connector, ConnectorProvider, ConnectorStatus
 from unstash.db.models.document import Document, DocumentStatus
 from unstash.db.models.document_metadata import DocumentMetadata
@@ -28,6 +34,11 @@ __all__ = [
     "AuditLog",
     "Base",
     "Chunk",
+    "Cluster",
+    "ClusterLabelSource",
+    "ClusteringRun",
+    "ClusteringRunStatus",
+    "ClusteringTrigger",
     "Connector",
     "ConnectorProvider",
     "ConnectorStatus",
