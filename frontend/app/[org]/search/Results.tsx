@@ -2,7 +2,7 @@
 
 import type { ReactNode, CSSProperties } from "react";
 import Link from "next/link";
-import { docType } from "@/app/lib/doctype";
+import { docBadge } from "@/app/lib/doctype";
 import type { SearchResponse } from "@/app/lib/api";
 import type { Dictionary } from "@/app/lib/i18n/dictionaries";
 import styles from "./Results.module.css";
@@ -84,7 +84,7 @@ export function Results({ org, query, data, failed, dict }: Props) {
       </p>
       <ol className={styles.list}>
         {data.results.map((result) => {
-          const type = docType(result.mime_type);
+          const type = docBadge(result.mime_type, result.category_label);
           return (
             <li
               key={result.chunk_id}

@@ -1,9 +1,30 @@
-// Filing colour and label for a result, keyed on the file type.
-// Classification (M5) will replace this mapping with the learned
-// document category.
+// Filing colour and label for a result. The learned category label wins
+// when the org has been clustered; the file-type mapping is the fallback
+// for unclustered orgs and noise documents.
 export interface DocType {
   readonly label: string;
   readonly colorVar: string;
+}
+
+const CATEGORY_COLORS: readonly string[] = [
+  "var(--type-protokoll)",
+  "var(--type-avtal)",
+  "var(--type-ekonomi)",
+  "var(--type-info)",
+];
+
+// The colour is derived from the label so a category keeps its colour
+// across renders and re-clusters that preserve the label.
+export function categoryBadge(label: string): DocType {
+  let hash = 0;
+  for (const char of label) {
+    hash = (hash * 31 + char.codePointAt(0)!) >>> 0;
+  }
+  return { label, colorVar: CATEGORY_COLORS[hash % CATEGORY_COLORS.length] };
+}
+
+export function docBadge(mimeType: string, categoryLabel: string | null): DocType {
+  return categoryLabel ? categoryBadge(categoryLabel) : docType(mimeType);
 }
 
 const BY_MIME: ReadonlyMap<string, DocType> = new Map([

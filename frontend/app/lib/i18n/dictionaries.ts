@@ -34,7 +34,18 @@ export interface Dictionary {
     readonly to: string;
     readonly type: string;
     readonly allTypes: string;
+    readonly category: string;
+    readonly allCategories: string;
     readonly clear: string;
+  };
+  readonly categories: {
+    readonly title: string;
+    readonly empty: string;
+    readonly documentsCount: string;
+    readonly recluster: string;
+    readonly requested: string;
+    readonly inProgress: string;
+    readonly failed: string;
   };
   readonly login: {
     readonly title: string;
@@ -78,7 +89,18 @@ const sv: Dictionary = {
     to: "Till",
     type: "Typ",
     allTypes: "Alla typer",
+    category: "Kategori",
+    allCategories: "Alla kategorier",
     clear: "Rensa filter",
+  },
+  categories: {
+    title: "Kategorier",
+    empty: "Inga kategorier ännu — de skapas automatiskt när arkivet växer.",
+    documentsCount: "{count} dokument",
+    recluster: "Uppdatera kategorier",
+    requested: "Uppdatering startad. Kategorierna byggs om i bakgrunden.",
+    inProgress: "En uppdatering pågår redan.",
+    failed: "Kunde inte starta uppdateringen.",
   },
   login: {
     title: "Logga in",
@@ -122,7 +144,18 @@ const en: Dictionary = {
     to: "To",
     type: "Type",
     allTypes: "All types",
+    category: "Category",
+    allCategories: "All categories",
     clear: "Clear filters",
+  },
+  categories: {
+    title: "Categories",
+    empty: "No categories yet — they are created automatically as the archive grows.",
+    documentsCount: "{count} documents",
+    recluster: "Refresh categories",
+    requested: "Refresh started. Categories are rebuilt in the background.",
+    inProgress: "A refresh is already in progress.",
+    failed: "Could not start the refresh.",
   },
   login: {
     title: "Sign in",

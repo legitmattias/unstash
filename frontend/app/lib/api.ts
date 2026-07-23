@@ -20,11 +20,35 @@ export interface SearchResultItem {
   readonly document_id: string;
   readonly title: string;
   readonly mime_type: string;
+  readonly category_label: string | null;
   readonly chunk_id: string;
   readonly excerpt: string;
   readonly snippet: string;
   readonly score: number;
   readonly rerank_score: number | null;
+}
+
+export interface ClusterKeyword {
+  readonly term: string;
+  readonly score: number;
+}
+
+export interface ClusterSummary {
+  readonly id: string;
+  readonly label: string;
+  readonly label_source: string;
+  readonly size: number;
+  readonly keywords: readonly ClusterKeyword[];
+  readonly representative_document_ids: readonly string[];
+}
+
+export interface ClustersResponse {
+  readonly run_id: string | null;
+  readonly run_created_at: string | null;
+  readonly document_count: number | null;
+  readonly noise_count: number | null;
+  readonly silhouette: number | null;
+  readonly clusters: readonly ClusterSummary[];
 }
 
 export interface SearchResponse {
