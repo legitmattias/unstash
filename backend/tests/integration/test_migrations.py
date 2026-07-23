@@ -60,6 +60,7 @@ async def test_upgrade_head_produces_expected_table_set(
         "document_metadata",
         "documents",
         "job_progress",
+        "llm_calls",
         "org_memberships",
         "organisations",
         "search_logs",

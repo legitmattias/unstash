@@ -23,6 +23,7 @@ from unstash.db.models.connector import Connector, ConnectorProvider, ConnectorS
 from unstash.db.models.document import Document, DocumentStatus
 from unstash.db.models.document_metadata import DocumentMetadata
 from unstash.db.models.job_progress import JobProgress, JobStatus
+from unstash.db.models.llm_call import LlmCall, LlmCallOutcome
 from unstash.db.models.org_membership import OrgMembership, OrgRole
 from unstash.db.models.organisation import Organisation
 from unstash.db.models.search_log import SearchLog
@@ -47,6 +48,8 @@ __all__ = [
     "DocumentStatus",
     "JobProgress",
     "JobStatus",
+    "LlmCall",
+    "LlmCallOutcome",
     "OrgMembership",
     "OrgRole",
     "Organisation",
