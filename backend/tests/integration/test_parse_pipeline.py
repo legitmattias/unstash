@@ -565,3 +565,39 @@ async def test_scanned_pdf_with_ocr_off_fails_actionably(
     document = await _poll_until_terminal(app_client, "acme", document_id)
     assert document["status"] == "failed", document
     assert "OCR is disabled" in document["parsing_error"]
+
+
+async def test_markdown_upload_preserves_swedish_characters(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """å/ä/ö survive the full upload → parse → chunk path byte-exact."""
+    user_a = await seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id)
+
+    markdown = (
+        "**Styrelseprotokoll**\n\n"
+        "Ordförande för föreningens styrelse på Gröndalsvägen beslutade "
+        "under våren att takrenoveringen skulle upphandlas.\n"
+    )
+
+    await login(app_client, USER_EMAIL, USER_PASSWORD)
+    response = await app_client.post(
+        "/api/orgs/acme/documents",
+        files={"file": ("protokoll-vår.md", markdown.encode("utf-8"), "text/markdown")},
+    )
+    assert response.status_code == 201, response.text
+    document_id = response.json()["document_id"]
+
+    document = await _poll_until_terminal(app_client, "acme", document_id)
+    assert document["status"] == "indexed", document
+
+    async with migrations_pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT text FROM chunks WHERE document_id = $1 ORDER BY chunk_index",
+            uuid.UUID(document_id),
+        )
+    combined = " ".join(row["text"] for row in rows)
+    for word in ("Ordförande", "föreningens", "Gröndalsvägen", "våren"):
+        assert word in combined, f"{word!r} missing or mangled in chunk text: {combined[:200]}"

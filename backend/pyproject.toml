@@ -46,6 +46,7 @@ dependencies = [
     "numpy>=2.0",
     "scikit-learn>=1.6",
     "litellm==1.93.0",
+    "stopwordsiso>=0.7.1",
 ]
 
 [dependency-groups]

@@ -42,6 +42,7 @@ _TOP_KEYWORDS = 10
 _REPRESENTATIVES_PER_CLUSTER = 3
 _LABEL_KEYWORDS = 3
 _MIN_CLUSTERS_FOR_SILHOUETTE = 2
+_STOPWORD_LANGUAGES = ("sv", "en")
 
 # UMAP cannot build a neighbour graph on fewer documents.
 MIN_DOCUMENTS = 10
@@ -92,7 +93,9 @@ def cluster_documents(
         ValueError: If inputs disagree in length or the corpus is smaller
             than :data:`MIN_DOCUMENTS`.
     """
+    import stopwordsiso  # noqa: PLC0415
     from bertopic import BERTopic  # noqa: PLC0415
+    from bertopic.vectorizers import ClassTfidfTransformer  # noqa: PLC0415
     from hdbscan import HDBSCAN  # noqa: PLC0415
     from sklearn.feature_extraction.text import CountVectorizer  # noqa: PLC0415
     from sklearn.metrics import silhouette_score  # noqa: PLC0415
@@ -125,11 +128,21 @@ def cluster_documents(
         metric="euclidean",
         cluster_selection_method="eom",
     )
+    # Function words dominate c-TF-IDF on small corpora (few clusters give
+    # the class-IDF little to discount), so keywords need an explicit
+    # stop-word list; reduce_frequent_words dampens the corpus-common
+    # remainder.
+    stop_words = sorted(stopwordsiso.stopwords(_STOPWORD_LANGUAGES))
+    # language="english" (the default) strips all non-ASCII characters in
+    # BERTopic's c-TF-IDF preprocessing; "multilingual" preserves å/ä/ö.
+    # With embedding_model=None the setting affects only that preprocessing.
     model = BERTopic(
+        language="multilingual",
         embedding_model=None,
         umap_model=umap_model,
         hdbscan_model=hdbscan_model,
-        vectorizer_model=CountVectorizer(),
+        vectorizer_model=CountVectorizer(stop_words=stop_words),
+        ctfidf_model=ClassTfidfTransformer(reduce_frequent_words=True),
         top_n_words=_TOP_KEYWORDS,
         calculate_probabilities=False,
         verbose=False,
@@ -172,6 +185,8 @@ def cluster_documents(
         "random_state": _RANDOM_STATE,
         "umap_metric": "cosine",
         "silhouette_space": "umap",
+        "stopword_languages": list(_STOPWORD_LANGUAGES),
+        "reduce_frequent_words": True,
         "bertopic_version": importlib.metadata.version("bertopic"),
     }
     return ClusteringOutput(

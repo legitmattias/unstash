@@ -3162,6 +3162,15 @@ wheels = [
 ]
 
 [[package]]
+name = "stopwordsiso"
+version = "0.7.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/66/f6/19709db9bff8c20a8d2c99dd657dbd51efcd76a2d43608c468307d503eea/stopwordsiso-0.7.1.tar.gz", hash = "sha256:10c1cf5df1c31646175178b0b13f0bd2e622384f4a3554986ed3acf85d73c9f0", size = 73352, upload-time = "2026-07-07T11:22:02.644Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/97/5f/2d2a6013c7afe7c06d39e208749cc669dd404ed521f7f603265e13758b04/stopwordsiso-0.7.1-py3-none-any.whl", hash = "sha256:e23edcffca952f98cd26f54a5c56f93b2fa435c88d3ee60f3beffb4c44279380", size = 74890, upload-time = "2026-07-07T11:22:01.435Z" },
+]
+
+[[package]]
 name = "structlog"
 version = "25.5.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3666,6 +3675,7 @@ dependencies = [
     { name = "python-multipart" },
     { name = "scikit-learn" },
     { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "stopwordsiso" },
     { name = "structlog" },
     { name = "taskiq" },
     { name = "taskiq-redis" },
@@ -3710,6 +3720,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "scikit-learn", specifier = ">=1.6" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.36" },
+    { name = "stopwordsiso", specifier = ">=0.7.1" },
     { name = "structlog", specifier = ">=25.0.0" },
     { name = "taskiq", specifier = ">=0.11.0" },
     { name = "taskiq-redis", specifier = ">=1.0.0" },
