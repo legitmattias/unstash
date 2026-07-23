@@ -64,6 +64,7 @@ services:
       UNSTASH_OCR_BACKEND: mistral
       UNSTASH_NER_BACKEND: hf
       UNSTASH_NER_ENDPOINT_URL: ${NER_ENDPOINT_URL:?NER_ENDPOINT_URL must be set when UNSTASH_NER_BACKEND=hf}
+      UNSTASH_LABELER_BACKEND: hosted
       UNSTASH_DEBUG: "false"
       UNSTASH_LOG_LEVEL: DEBUG
     volumes:

@@ -185,6 +185,26 @@ class Settings(BaseSettings):
         description="Indexed documents an org needs before clustering first runs.",
     )
 
+    # -- Cluster labeling (surgical LLM, ADR 0011) ------------------------------
+    # 'hosted' calls the configured chat model via the in-process LiteLLM
+    # SDK; 'fake' is deterministic for tests; 'off' leaves keyword labels.
+    labeler_backend: str = Field(
+        default="off",
+        description="Cluster-label backend: 'hosted', 'fake', or 'off'.",
+    )
+    labeler_model: str = Field(
+        default="mistral/mistral-small-2603",
+        description="LiteLLM model identifier for cluster labeling.",
+    )
+    labeler_language: str = Field(
+        default="sv",
+        description="ISO 639-1 language for generated labels.",
+    )
+    labeler_timeout_seconds: float = Field(default=30.0, gt=0)
+    # Bounds a single run's spend regardless of cluster count (ADR 0011:
+    # budget caps are enforced per-component).
+    labeler_max_calls_per_run: int = Field(default=30, gt=0)
+
     # -- OCR (scanned PDFs) -----------------------------------------------------
     # 'mistral' sends low-text-density PDFs to the Mistral OCR API;
     # 'off' fails them with an actionable error instead (a scan without
