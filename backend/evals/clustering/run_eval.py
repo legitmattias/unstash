@@ -94,8 +94,12 @@ def purity(assignments: list[int], truth: list[str]) -> float:
     return majority / clustered
 
 
-async def load_corpus_cached(embedder, embedder_kind: str):
-    """Cache the pooled embeddings per embedder kind; corpus text is cheap."""
+async def load_corpus_cached(embedder_kind: str):
+    """Cache the pooled embeddings per embedder kind; corpus text is cheap.
+
+    The embedder is only constructed on a cache miss, so cached sweeps
+    need no API key.
+    """
     cache = HERE / f"embeddings-{embedder_kind}.npz"
     if cache.exists():
         stored = np.load(cache, allow_pickle=True)
@@ -106,7 +110,7 @@ async def load_corpus_cached(embedder, embedder_kind: str):
             stored["embeddings"],
             list(stored["truth"]),
         )
-    names, texts, embeddings, truth = await load_corpus(embedder)
+    names, texts, embeddings, truth = await load_corpus(build_embedder(embedder_kind))
     np.savez(cache, names=names, texts=texts, embeddings=embeddings, truth=truth)
     return names, texts, embeddings, truth
 
@@ -116,8 +120,7 @@ async def run(embedder_kind: str, json_path: str | None, selection: str) -> None
 
     from unstash.clustering.engine import cluster_documents, keyword_label
 
-    embedder = build_embedder(embedder_kind)
-    names, texts, embeddings, truth = await load_corpus_cached(embedder, embedder_kind)
+    names, texts, embeddings, truth = await load_corpus_cached(embedder_kind)
     print(f"corpus: {len(names)} documents, {len(set(truth))} ground-truth types", flush=True)
 
     result = cluster_documents(texts, embeddings, cluster_selection_method=selection)
