@@ -23,6 +23,7 @@ from unstash.admin import admin_router
 from unstash.auth import auth_backend, fastapi_users
 from unstash.auth.dependencies import current_user_or_token
 from unstash.auth.schemas import UserRead
+from unstash.clustering.router import clusters_router
 from unstash.config import get_settings
 from unstash.db import dispose_engine, get_engine
 from unstash.db.models import User
@@ -225,6 +226,12 @@ def create_app() -> FastAPI:
         search_router,
         prefix="/api",
         tags=["search"],
+    )
+
+    app.include_router(
+        clusters_router,
+        prefix="/api",
+        tags=["clusters"],
     )
 
     return app

@@ -13,6 +13,7 @@ class SearchResultItem(BaseModel):
     document_id: uuid.UUID
     title: str
     mime_type: str
+    category_label: str | None
     chunk_id: uuid.UUID
     excerpt: str  # the full best-matching chunk
     snippet: str  # a bounded, match-centred excerpt for the result list

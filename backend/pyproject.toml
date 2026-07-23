@@ -156,6 +156,8 @@ ignore = [
 # importable at runtime even when otherwise only used in annotations.
 "src/unstash/admin/router.py" = ["TC003"]
 "src/unstash/admin/schemas.py" = ["TC001", "TC003"]
+"src/unstash/clustering/router.py" = ["TC001"]
+"src/unstash/clustering/schemas.py" = ["TC001", "TC003"]
 "src/unstash/orgs/router.py" = ["TC001"]
 "src/unstash/orgs/schemas.py" = ["TC001", "TC003"]
 "src/unstash/orgs/dependencies.py" = ["TC003"]
