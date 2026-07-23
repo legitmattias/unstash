@@ -77,6 +77,8 @@ def keyword_label(keywords: Sequence[tuple[str, float]]) -> str:
 def cluster_documents(
     texts: Sequence[str],
     embeddings: npt.NDArray[np.float64],
+    *,
+    cluster_selection_method: str = "eom",
 ) -> ClusteringOutput:
     """Cluster documents from pooled embeddings and representative texts.
 
@@ -85,6 +87,9 @@ def cluster_documents(
             for c-TF-IDF keyword extraction, not for embedding.
         embeddings: Array of shape ``(len(texts), dim)`` — pooled
             document-level embeddings.
+        cluster_selection_method: How flat clusters are read from HDBSCAN's
+            hierarchy: ``"eom"`` (stability-favouring, coarser) or
+            ``"leaf"`` (finest-grained leaves).
 
     Returns:
         A :class:`ClusteringOutput` aligned with the input order.
@@ -126,7 +131,7 @@ def cluster_documents(
     hdbscan_model = HDBSCAN(
         min_cluster_size=min_cluster_size,
         metric="euclidean",
-        cluster_selection_method="eom",
+        cluster_selection_method=cluster_selection_method,
     )
     # Function words dominate c-TF-IDF on small corpora (few clusters give
     # the class-IDF little to discount), so keywords need an explicit
@@ -183,6 +188,7 @@ def cluster_documents(
         "n_neighbors": n_neighbors,
         "n_components": n_components,
         "random_state": _RANDOM_STATE,
+        "cluster_selection_method": cluster_selection_method,
         "umap_metric": "cosine",
         "silhouette_space": "umap",
         "stopword_languages": list(_STOPWORD_LANGUAGES),

@@ -94,16 +94,33 @@ def purity(assignments: list[int], truth: list[str]) -> float:
     return majority / clustered
 
 
-async def run(embedder_kind: str, json_path: str | None) -> None:
+async def load_corpus_cached(embedder, embedder_kind: str):
+    """Cache the pooled embeddings per embedder kind; corpus text is cheap."""
+    cache = HERE / f"embeddings-{embedder_kind}.npz"
+    if cache.exists():
+        stored = np.load(cache, allow_pickle=True)
+        print(f"using cached embeddings from {cache.name}", flush=True)
+        return (
+            list(stored["names"]),
+            list(stored["texts"]),
+            stored["embeddings"],
+            list(stored["truth"]),
+        )
+    names, texts, embeddings, truth = await load_corpus(embedder)
+    np.savez(cache, names=names, texts=texts, embeddings=embeddings, truth=truth)
+    return names, texts, embeddings, truth
+
+
+async def run(embedder_kind: str, json_path: str | None, selection: str) -> None:
     from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
     from unstash.clustering.engine import cluster_documents, keyword_label
 
     embedder = build_embedder(embedder_kind)
-    names, texts, embeddings, truth = await load_corpus(embedder)
+    names, texts, embeddings, truth = await load_corpus_cached(embedder, embedder_kind)
     print(f"corpus: {len(names)} documents, {len(set(truth))} ground-truth types", flush=True)
 
-    result = cluster_documents(texts, embeddings)
+    result = cluster_documents(texts, embeddings, cluster_selection_method=selection)
     noise = sum(1 for a in result.assignments if a == -1)
 
     non_noise = [(a, t) for a, t in zip(result.assignments, truth, strict=True) if a != -1]
@@ -152,6 +169,7 @@ async def run(embedder_kind: str, json_path: str | None) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--embedder", choices=["jina", "fake"], default="jina")
+    parser.add_argument("--selection", choices=["eom", "leaf"], default="eom")
     parser.add_argument("--json", dest="json_path", default=None)
     args = parser.parse_args()
-    asyncio.run(run(args.embedder, args.json_path))
+    asyncio.run(run(args.embedder, args.json_path, args.selection))
