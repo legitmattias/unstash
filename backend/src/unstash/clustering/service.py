@@ -14,6 +14,7 @@ row that a later run supersedes rather than a long-lived open transaction.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -26,15 +27,19 @@ from unstash.clustering.engine import (
     cluster_documents,
     keyword_label,
 )
+from unstash.clustering.labeler import LabelError, LabelRequest, LabelResult, get_labeler
 from unstash.db.models import (
     Chunk,
     Cluster,
     ClusteringRun,
     ClusteringRunStatus,
     ClusteringTrigger,
+    ClusterLabelSource,
     Document,
     DocumentStatus,
+    LlmCallOutcome,
 )
+from unstash.llm import record_llm_call
 from unstash.tasks.context import org_context
 
 if TYPE_CHECKING:
@@ -51,6 +56,9 @@ logger = structlog.get_logger(__name__)
 # extraction needs enough text to find discriminative terms, not the full
 # document.
 _LEAD_TEXT_CHARS = 2000
+# Excerpt length per representative document in the labeling prompt —
+# data-minimal by design (ADR 0011): keywords + titles + a sentence or two.
+_LABEL_EXCERPT_CHARS = 200
 _DOUBLING_FACTOR = 2
 
 
@@ -243,7 +251,14 @@ async def execute_clustering(
         return None
 
     async with org_context(org_id) as session:
-        await _persist_outcome(session, org_id, run_id, corpus, output)
+        cluster_ids = await _persist_outcome(session, org_id, run_id, corpus, output)
+
+    # Labeling is best-effort on top of a run that already succeeded with
+    # keyword labels; a crash here must not fail the run.
+    try:
+        await _apply_llm_labels(org_id, corpus, output, cluster_ids)
+    except Exception:
+        logger.exception("cluster_labeling_failed", org_id=str(org_id), run_id=str(run_id))
 
     logger.info(
         "clustering_completed",
@@ -263,8 +278,11 @@ async def _persist_outcome(
     run_id: uuid.UUID,
     corpus: OrgCorpus,
     output: ClusteringOutput,
-) -> None:
-    """Write clusters, re-point document assignments, close the run."""
+) -> dict[int, uuid.UUID]:
+    """Write clusters, re-point document assignments, close the run.
+
+    Returns the engine-cluster-id → cluster-row-id mapping for labeling.
+    """
     clusters: dict[int, Cluster] = {}
     for engine_id, terms in output.keywords.items():
         member_count = sum(1 for a in output.assignments if a == engine_id)
@@ -311,3 +329,87 @@ async def _persist_outcome(
             params=output.params,
         ),
     )
+    return {engine_id: cluster.id for engine_id, cluster in clusters.items()}
+
+
+async def _apply_llm_labels(
+    org_id: uuid.UUID,
+    corpus: OrgCorpus,
+    output: ClusteringOutput,
+    cluster_ids: dict[int, uuid.UUID],
+) -> None:
+    """Upgrade keyword labels to LLM labels, one call per cluster.
+
+    Calls run outside any transaction; results and audit rows are written
+    in one org-scoped transaction afterwards. A failed call keeps that
+    cluster's keyword label and still gets an audit row.
+    """
+    from unstash.config import get_settings  # noqa: PLC0415
+
+    settings = get_settings()
+    labeler = get_labeler(settings)
+    if labeler is None or not cluster_ids:
+        return
+
+    capped = sorted(cluster_ids)[: settings.labeler_max_calls_per_run]
+    if len(capped) < len(cluster_ids):
+        logger.warning(
+            "cluster_labeling_capped",
+            org_id=str(org_id),
+            clusters=len(cluster_ids),
+            cap=settings.labeler_max_calls_per_run,
+        )
+
+    results: list[tuple[int, LabelResult | None, str | None, int]] = []
+    for engine_id in capped:
+        titles: list[str] = []
+        excerpts: list[str] = []
+        for index in output.representatives[engine_id]:
+            title, _, lead = corpus.texts[index].partition("\n")
+            titles.append(title)
+            excerpts.append(lead[:_LABEL_EXCERPT_CHARS])
+        request = LabelRequest(
+            keywords=[term for term, _ in output.keywords[engine_id]],
+            representative_titles=titles,
+            representative_excerpts=excerpts,
+            language=settings.labeler_language,
+        )
+        call_start = time.perf_counter()
+        try:
+            result = await labeler.label(request)
+            results.append((engine_id, result, None, _elapsed_ms(call_start)))
+        except LabelError as exc:
+            results.append((engine_id, None, str(exc), _elapsed_ms(call_start)))
+
+    async with org_context(org_id) as session:
+        for engine_id, result, error, latency_ms in results:
+            if result is not None:
+                await session.execute(
+                    update(Cluster)
+                    .where(Cluster.id == cluster_ids[engine_id])
+                    .values(label=result.label, label_source=ClusterLabelSource.LLM),
+                )
+            await record_llm_call(
+                session,
+                org_id=org_id,
+                purpose="cluster_label",
+                model=result.model if result else settings.labeler_model,
+                latency_ms=latency_ms,
+                outcome=LlmCallOutcome.OK if result else LlmCallOutcome.ERROR,
+                prompt_tokens=result.prompt_tokens if result else None,
+                completion_tokens=result.completion_tokens if result else None,
+                cost=result.cost if result else None,
+                error=error,
+            )
+
+    labeled = sum(1 for _, result, _, _ in results if result is not None)
+    logger.info(
+        "cluster_labeling_completed",
+        org_id=str(org_id),
+        labeled=labeled,
+        failed=len(results) - labeled,
+    )
+
+
+def _elapsed_ms(start: float) -> int:
+    return round((time.perf_counter() - start) * 1000)

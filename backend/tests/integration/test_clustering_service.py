@@ -20,6 +20,7 @@ from tests.integration.conftest import (
     TEST_APP_PASSWORD,
     TEST_MIGRATIONS_PASSWORD,
 )
+from unstash.clustering.labeler import LabelError
 from unstash.clustering.service import execute_clustering, load_org_corpus, pending_trigger
 from unstash.config import get_settings
 from unstash.db.engine import dispose_engine, get_engine
@@ -29,6 +30,7 @@ from unstash.db.models import (
     ClusteringRunStatus,
     ClusteringTrigger,
     Document,
+    LlmCall,
 )
 from unstash.db.session import get_sessionmaker
 from unstash.tasks import org_context
@@ -235,5 +237,79 @@ async def test_corpus_excludes_unembedded_documents(
             corpus = await load_org_corpus(session, org_id)
         assert len(corpus.document_ids) == len(_BLOB_TITLES) * _DOCS_PER_BLOB
         assert corpus.embeddings.shape == (len(corpus.document_ids), _DIM)
+    finally:
+        await dispose_engine()
+
+
+@pytest.mark.usefixtures("_engine_env")
+async def test_fake_labeler_upgrades_labels_and_records_calls(
+    migrations_pool: asyncpg.Pool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("UNSTASH_LABELER_BACKEND", "fake")
+    get_settings.cache_clear()
+    org_id = await _seed_org_with_blobs(migrations_pool)
+    try:
+        run_id = await execute_clustering(org_id, ClusteringTrigger.MANUAL)
+        assert run_id is not None
+
+        async with org_context(org_id) as session:
+            clusters = (
+                (await session.execute(select(Cluster).where(Cluster.run_id == run_id)))
+                .scalars()
+                .all()
+            )
+            assert clusters
+            for cluster in clusters:
+                assert cluster.label_source == "llm"
+                assert cluster.label[0].isupper()
+
+            calls = (
+                (await session.execute(select(LlmCall).where(LlmCall.org_id == org_id)))
+                .scalars()
+                .all()
+            )
+            assert len(calls) == len(clusters)
+            assert all(c.purpose == "cluster_label" for c in calls)
+            assert all(c.outcome == "ok" for c in calls)
+    finally:
+        await dispose_engine()
+
+
+@pytest.mark.usefixtures("_engine_env")
+async def test_failed_labeling_keeps_keyword_label(
+    migrations_pool: asyncpg.Pool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FailingLabeler:
+        async def label(self, request):
+            raise LabelError("synthetic failure")
+
+    monkeypatch.setattr(
+        "unstash.clustering.service.get_labeler",
+        lambda settings: _FailingLabeler(),
+    )
+    org_id = await _seed_org_with_blobs(migrations_pool)
+    try:
+        run_id = await execute_clustering(org_id, ClusteringTrigger.MANUAL)
+        assert run_id is not None
+
+        async with org_context(org_id) as session:
+            clusters = (
+                (await session.execute(select(Cluster).where(Cluster.run_id == run_id)))
+                .scalars()
+                .all()
+            )
+            assert clusters
+            assert all(c.label_source == "keyword_fallback" for c in clusters)
+
+            calls = (
+                (await session.execute(select(LlmCall).where(LlmCall.org_id == org_id)))
+                .scalars()
+                .all()
+            )
+            assert len(calls) == len(clusters)
+            assert all(c.outcome == "error" for c in calls)
+            assert all(c.error == "synthetic failure" for c in calls)
     finally:
         await dispose_engine()

@@ -45,6 +45,7 @@ dependencies = [
     "bertopic>=0.17.4",
     "numpy>=2.0",
     "scikit-learn>=1.6",
+    "litellm==1.93.0",
 ]
 
 [dependency-groups]
