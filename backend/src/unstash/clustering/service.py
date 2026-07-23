@@ -140,15 +140,19 @@ async def load_org_corpus(session: AsyncSession, org_id: uuid.UUID) -> OrgCorpus
     corpus states produce identical engine input.
     """
     rows = (
-        await session.execute(
-            select(Document.id, Document.title)
-            .where(
-                Document.org_id == org_id,
-                Document.status == DocumentStatus.INDEXED,
+        (
+            await session.execute(
+                select(Document.id, Document.title)
+                .where(
+                    Document.org_id == org_id,
+                    Document.status == DocumentStatus.INDEXED,
+                )
+                .order_by(Document.created_at, Document.id),
             )
-            .order_by(Document.created_at, Document.id),
         )
-    ).all()
+        .tuples()
+        .all()
+    )
     titles = dict(rows)
 
     chunk_rows = (
@@ -164,13 +168,17 @@ async def load_org_corpus(session: AsyncSession, org_id: uuid.UUID) -> OrgCorpus
         by_document.setdefault(doc_id, []).append(embedding)
 
     lead_rows = (
-        await session.execute(
-            select(Chunk.document_id, Chunk.text).where(
-                Chunk.org_id == org_id,
-                Chunk.chunk_index == 0,
-            ),
+        (
+            await session.execute(
+                select(Chunk.document_id, Chunk.text).where(
+                    Chunk.org_id == org_id,
+                    Chunk.chunk_index == 0,
+                ),
+            )
         )
-    ).all()
+        .tuples()
+        .all()
+    )
     lead_texts = dict(lead_rows)
 
     document_ids: list[uuid.UUID] = []
