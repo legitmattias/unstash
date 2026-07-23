@@ -15,7 +15,8 @@ inside :func:`org_context`, and writes any results back to the
 from __future__ import annotations
 
 from unstash.tasks.broker import broker
+from unstash.tasks.cluster import cluster_org_documents
 from unstash.tasks.context import org_context
 from unstash.tasks.ingest import ingest_document
 
-__all__ = ["broker", "ingest_document", "org_context"]
+__all__ = ["broker", "cluster_org_documents", "ingest_document", "org_context"]

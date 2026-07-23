@@ -206,16 +206,19 @@ async def embed_document(
     retry after a mid-embed crash finishes the remaining chunks without
     re-parsing.
     """
+    from unstash.clustering.service import pending_trigger  # noqa: PLC0415
     from unstash.config import get_settings  # noqa: PLC0415
     from unstash.documents.embedder import (  # noqa: PLC0415
         EmbeddingTask,
         get_embedder,
     )
+    from unstash.tasks.cluster import cluster_org_documents  # noqa: PLC0415
 
     org_id = uuid.UUID(org_id_str)
     document_id = uuid.UUID(document_id_str)
     job_id = uuid.UUID(job_id_str)
 
+    trigger = None
     async with org_context(org_id) as session:
         document, job = await _load_targets(session, document_id, job_id)
         if document is None or job is None:
@@ -273,6 +276,18 @@ async def embed_document(
             total_tokens=total_tokens,
             duration_ms=round((finished - started).total_seconds() * 1000),
             peak_rss_mib=round(peak_rss_mib(), 1),
+        )
+
+        trigger = await pending_trigger(session, org_id)
+
+    # Enqueued after the transaction commits so the clustering task's own
+    # document count includes this document.
+    if trigger is not None:
+        await cluster_org_documents.kiq(str(org_id), trigger.value)
+        logger.info(
+            "clustering_enqueued",
+            org_id=str(org_id),
+            trigger=trigger.value,
         )
 
 
