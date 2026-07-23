@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { apiFetch, type SearchResponse } from "@/app/lib/api";
+import { apiFetch, type ClustersResponse, type SearchResponse } from "@/app/lib/api";
 import { resolveLocale } from "@/app/lib/i18n/locale";
 import { getDictionary } from "@/app/lib/i18n/dictionaries";
 import { Header } from "@/app/components/Header";
@@ -24,8 +24,14 @@ export default async function SearchPage({ params, searchParams }: PageProps) {
   const mimeType = first(sp.mime_type);
   const dateFrom = first(sp.date_from);
   const dateTo = first(sp.date_to);
+  const category = first(sp.category);
   const locale = await resolveLocale();
   const dict = getDictionary(locale);
+
+  const clustersRes = await apiFetch(`/api/orgs/${org}/clusters`);
+  const clusters: ClustersResponse | null = clustersRes.ok
+    ? ((await clustersRes.json()) as ClustersResponse)
+    : null;
 
   let data: SearchResponse | null = null;
   let failed = false;
@@ -34,6 +40,7 @@ export default async function SearchPage({ params, searchParams }: PageProps) {
     if (mimeType) qs.set("mime_type", mimeType);
     if (dateFrom) qs.set("date_from", dateFrom);
     if (dateTo) qs.set("date_to", dateTo);
+    if (category) qs.set("category", category);
     const res = await apiFetch(`/api/orgs/${org}/search?${qs.toString()}`);
     if (res.status === 401 || res.status === 403) {
       redirect(`/login?next=${encodeURIComponent(`/${org}/search`)}`);
@@ -57,6 +64,8 @@ export default async function SearchPage({ params, searchParams }: PageProps) {
           mimeType={mimeType}
           dateFrom={dateFrom}
           dateTo={dateTo}
+          category={category}
+          categories={clusters?.clusters.map((c) => ({ id: c.id, label: c.label })) ?? []}
           dict={dict.filters}
         />
         <main className={styles.main}>

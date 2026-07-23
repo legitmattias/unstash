@@ -14,15 +14,22 @@ const TYPE_OPTIONS: readonly { value: string; label?: string }[] = [
   { value: "text/markdown", label: "Text" },
 ];
 
+interface CategoryOption {
+  readonly id: string;
+  readonly label: string;
+}
+
 interface Props {
   readonly org: string;
   readonly mimeType: string;
   readonly dateFrom: string;
   readonly dateTo: string;
+  readonly category: string;
+  readonly categories: readonly CategoryOption[];
   readonly dict: Dictionary["filters"];
 }
 
-export function Filters({ org, mimeType, dateFrom, dateTo, dict }: Props) {
+export function Filters({ org, mimeType, dateFrom, dateTo, category, categories, dict }: Props) {
   const router = useRouter();
 
   function update(key: string, value: string) {
@@ -45,7 +52,7 @@ export function Filters({ org, mimeType, dateFrom, dateTo, dict }: Props) {
     router.push(`/${org}/search?${params.toString()}`);
   }
 
-  const hasFilters = Boolean(mimeType || dateFrom || dateTo);
+  const hasFilters = Boolean(mimeType || dateFrom || dateTo || category);
 
   return (
     <aside className={styles.side} aria-label={dict.heading}>
@@ -70,6 +77,25 @@ export function Filters({ org, mimeType, dateFrom, dateTo, dict }: Props) {
           />
         </label>
       </section>
+
+      {categories.length > 0 ? (
+        <section className={styles.group}>
+          <h2 className={styles.heading}>{dict.category}</h2>
+          <select
+            className={styles.select}
+            value={category}
+            onChange={(e) => update("category", e.target.value)}
+            aria-label={dict.category}
+          >
+            <option value="">{dict.allCategories}</option>
+            {categories.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </section>
+      ) : null}
 
       <section className={styles.group}>
         <h2 className={styles.heading}>{dict.type}</h2>

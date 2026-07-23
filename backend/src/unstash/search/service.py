@@ -51,6 +51,7 @@ class SearchHit:
     document_id: uuid.UUID
     title: str
     mime_type: str
+    category_label: str | None
     chunk_id: uuid.UUID
     excerpt: str
     snippet: str
@@ -100,6 +101,7 @@ class _Candidate:
     document_id: uuid.UUID
     title: str
     mime_type: str
+    category_label: str | None
     chunk_id: uuid.UUID
     excerpt: str
     fused_score: float
@@ -112,11 +114,12 @@ class SearchFilters:
     mime_type: str | None = None
     date_from: str | None = None  # inclusive ISO date bound
     date_to: str | None = None  # inclusive ISO date bound
+    category: str | None = None  # cluster id (UUID string)
 
     @property
     def any(self) -> bool:
         """True when at least one filter is set."""
-        return any((self.mime_type, self.date_from, self.date_to))
+        return any((self.mime_type, self.date_from, self.date_to, self.category))
 
 
 # The date filter matches a document that carries at least one extracted
@@ -145,6 +148,9 @@ def _filter_clause(filters: SearchFilters) -> tuple[str, dict[str, object]]:
     if filters.mime_type is not None:
         fragments.append(" AND d.mime_type = :mime_type")
         params["mime_type"] = filters.mime_type
+    if filters.category is not None:
+        fragments.append(" AND d.cluster_id = CAST(:category AS uuid)")
+        params["category"] = filters.category
     if filters.date_from is not None or filters.date_to is not None:
         fragments.append(_DATE_FILTER)
         params["date_from"] = filters.date_from or "0001-01-01"
@@ -160,8 +166,10 @@ def _vector_sql(filter_clause: str) -> TextClause:
     # filter_clause is composed only of fixed fragments in _filter_clause;
     # all user values travel as bind parameters, so no user input is spliced.
     return text(
-        "SELECT c.id AS chunk_id, c.text, c.document_id, d.title, d.mime_type"  # noqa: S608
+        "SELECT c.id AS chunk_id, c.text, c.document_id, d.title, d.mime_type,"  # noqa: S608
+        " cl.label AS category_label"
         " FROM chunks c JOIN documents d ON d.id = c.document_id"
+        " LEFT JOIN clusters cl ON cl.id = d.cluster_id"
         " WHERE c.org_id = :org_id AND d.status = 'indexed' AND c.embedding IS NOT NULL"
         f"{filter_clause}"
         " ORDER BY c.embedding <=> CAST(:query_vec AS vector) LIMIT :pool",
@@ -171,8 +179,10 @@ def _vector_sql(filter_clause: str) -> TextClause:
 def _bm25_sql(filter_clause: str) -> TextClause:
     return text(
         "SELECT c.id AS chunk_id, c.text, c.document_id, d.title, d.mime_type,"  # noqa: S608
+        " cl.label AS category_label,"
         " paradedb.score(c.id) AS score"
         " FROM chunks c JOIN documents d ON d.id = c.document_id"
+        " LEFT JOIN clusters cl ON cl.id = d.cluster_id"
         " WHERE c.org_id = :org_id AND d.status = 'indexed' AND c.text @@@ :query"
         f"{filter_clause}"
         " ORDER BY score DESC LIMIT :pool",
@@ -282,6 +292,7 @@ async def run_search(  # noqa: PLR0913, PLR0915 — a linear pipeline with per-s
                 document_id=row["document_id"],
                 title=row["title"],
                 mime_type=row["mime_type"],
+                category_label=row["category_label"],
                 chunk_id=chunk_id,
                 excerpt=row["text"],
                 fused_score=score,
@@ -312,6 +323,7 @@ async def run_search(  # noqa: PLR0913, PLR0915 — a linear pipeline with per-s
             document_id=c.document_id,
             title=c.title,
             mime_type=c.mime_type,
+            category_label=c.category_label,
             chunk_id=c.chunk_id,
             excerpt=c.excerpt,
             snippet=make_snippet(c.excerpt, query),

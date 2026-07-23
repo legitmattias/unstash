@@ -9,7 +9,7 @@ the ranking feedback signal.
 from __future__ import annotations
 
 import time
-import uuid  # noqa: TC003
+import uuid
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -39,6 +39,7 @@ QueryParam = Annotated[str, Query(min_length=1, max_length=1000, alias="q")]
 MimeFilter = Annotated[str | None, Query(max_length=255, alias="mime_type")]
 DateFromFilter = Annotated[date | None, Query(alias="date_from")]
 DateToFilter = Annotated[date | None, Query(alias="date_to")]
+CategoryFilter = Annotated[uuid.UUID | None, Query(alias="category")]
 
 
 def _logged_results(outcome: SearchOutcome) -> list[dict[str, Any]]:
@@ -74,6 +75,7 @@ def _ranking_config(
             "mime_type": filters.mime_type,
             "date_from": filters.date_from,
             "date_to": filters.date_to,
+            "category": filters.category,
         },
     }
 
@@ -87,13 +89,15 @@ async def search(  # noqa: PLR0913 — query + optional filter params
     mime_type: MimeFilter = None,
     date_from: DateFromFilter = None,
     date_to: DateToFilter = None,
+    category: CategoryFilter = None,
 ) -> SearchResponse:
-    """Run a hybrid search, optionally filtered by mime type and date range."""
+    """Run a hybrid search, optionally filtered by mime type, date range, and category."""
     settings = get_settings()
     filters = SearchFilters(
         mime_type=mime_type,
         date_from=date_from.isoformat() if date_from else None,
         date_to=date_to.isoformat() if date_to else None,
+        category=str(category) if category else None,
     )
     # Absent outside the lifespan (e.g. ASGI test transports); clients
     # then fall back to a per-call connection.
@@ -137,6 +141,7 @@ async def search(  # noqa: PLR0913 — query + optional filter params
                 document_id=hit.document_id,
                 title=hit.title,
                 mime_type=hit.mime_type,
+                category_label=hit.category_label,
                 chunk_id=hit.chunk_id,
                 excerpt=hit.excerpt,
                 snippet=hit.snippet,
