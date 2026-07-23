@@ -116,3 +116,24 @@ def test_rejects_length_mismatch():
 def test_keyword_label_joins_top_terms():
     label = keyword_label([("avtal", 0.9), ("leverantör", 0.5), ("uppsägning", 0.3), ("x", 0.1)])
     assert label == "avtal, leverantör, uppsägning"
+
+
+def test_keywords_exclude_stop_words_and_keep_diacritics():
+    # Realistic prose: function words dominate raw term frequency in every
+    # blob, and the content words carry å/ä/ö.
+    rng_texts = {
+        0: "protokollet fördes av ordföranden och styrelsen beslutade att under året",
+        1: "fakturan som avser beloppet ska betalas under månaden och förfaller",
+        2: "avtalet med leverantören är uppsagt och skall omförhandlas under våren",
+        3: "stämman höll omröstning om motionen och medlemmarna röstade under mötet",
+    }
+    texts, embeddings, _ = _planted_corpus()
+    texts = [f"{rng_texts[i % 4]} {t}" for i, t in enumerate(texts)]
+
+    result = cluster_documents(texts, embeddings)
+
+    all_terms = {term for terms in result.keywords.values() for term, _ in terms}
+    banned = {"och", "att", "av", "som", "under", "är", "den", "the", "and"}
+    assert not (all_terms & banned), f"stop words leaked into keywords: {all_terms & banned}"
+    # Diacritics survive tokenization end-to-end.
+    assert any("å" in t or "ä" in t or "ö" in t for t in all_terms), all_terms
