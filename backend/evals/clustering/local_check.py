@@ -32,12 +32,16 @@ from run_eval import _LEAD_TEXT_CHARS, build_embedder
 SUFFIXES = {".pdf", ".docx", ".md", ".txt"}
 
 
+def _find_files(corpus_dir: Path, max_files: int) -> list[Path]:
+    return sorted(p for p in corpus_dir.rglob("*") if p.suffix.lower() in SUFFIXES)[:max_files]
+
+
 async def main(corpus_dir: Path, selection: str, max_files: int) -> None:
     from unstash.clustering.engine import cluster_documents, keyword_label
     from unstash.documents.embedder import EmbeddingTask
     from unstash.documents.parser import parse_to_chunks
 
-    files = sorted(p for p in corpus_dir.rglob("*") if p.suffix.lower() in SUFFIXES)[:max_files]
+    files = await asyncio.to_thread(_find_files, corpus_dir, max_files)
     if not files:
         sys.exit(f"no supported documents under {corpus_dir}")
     print(f"parsing and embedding {len(files)} documents ...", flush=True)
