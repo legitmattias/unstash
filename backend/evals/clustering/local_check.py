@@ -43,6 +43,9 @@ SUFFIXES = {".pdf", ".docx", ".md", ".txt"}
 OCR_MIN_CHARS_PER_PAGE = 200
 OCR_MAX_BYTES = 50 * 1024 * 1024
 OCR_CACHE = Path.home() / ".cache" / "unstash-local-eval" / "ocr"
+# Pooled document embeddings, keyed on file content like the OCR cache, so
+# parameter iteration re-clusters without re-parsing or re-embedding.
+EMB_CACHE = Path.home() / ".cache" / "unstash-local-eval" / "emb"
 
 
 def _find_files(corpus_dir: Path, max_files: int, sample_seed: int | None) -> list[Path]:
@@ -121,6 +124,34 @@ async def _llm_labels(result, names: list[str], texts: list[str]) -> dict[int, s
     return labels
 
 
+async def _load_document(path: Path, use_ocr: bool, embedder):
+    """(text, pooled embedding) for one file, via the content-keyed cache."""
+    from unstash.documents.embedder import EmbeddingTask
+    from unstash.documents.ocr import OcrError
+
+    digest = hashlib.sha256(await asyncio.to_thread(path.read_bytes)).hexdigest()
+    cached = EMB_CACHE / f"{digest}.npz"
+    if cached.exists():
+        stored = np.load(cached, allow_pickle=True)
+        return str(stored["text"]), stored["embedding"]
+    try:
+        chunk_texts = await _chunk_texts_with_ocr(path, use_ocr)
+    except OcrError as exc:
+        print(f"  skipping {path.name}: OCR failed ({exc})", flush=True)
+        return None
+    except Exception as exc:
+        print(f"  skipping {path.name}: {type(exc).__name__}", flush=True)
+        return None
+    if not chunk_texts:
+        print(f"  skipping {path.name}: no text", flush=True)
+        return None
+    batch = await embedder.embed(chunk_texts, task=EmbeddingTask.PASSAGE)
+    text = f"{path.name}\n{chunk_texts[0][:_LEAD_TEXT_CHARS]}"
+    embedding = np.asarray(batch.vectors, dtype=np.float64).mean(axis=0)
+    np.savez(cached, text=text, embedding=embedding)
+    return text, embedding
+
+
 async def main(
     corpus_dir: Path,
     selection: str,
@@ -130,12 +161,11 @@ async def main(
     use_labels: bool,
 ) -> None:
     from unstash.clustering.engine import cluster_documents, keyword_label
-    from unstash.documents.embedder import EmbeddingTask
-    from unstash.documents.ocr import OcrError
 
     if (use_ocr or use_labels) and not os.environ.get("MISTRAL_API_KEY"):
         sys.exit("MISTRAL_API_KEY is required with --ocr / --label")
     OCR_CACHE.mkdir(parents=True, exist_ok=True)
+    EMB_CACHE.mkdir(parents=True, exist_ok=True)
 
     files = await asyncio.to_thread(_find_files, corpus_dir, max_files, sample_seed)
     if not files:
@@ -147,21 +177,13 @@ async def main(
     texts: list[str] = []
     pooled: list[np.ndarray] = []
     for path in files:
-        try:
-            chunk_texts = await _chunk_texts_with_ocr(path, use_ocr)
-        except OcrError as exc:
-            print(f"  skipping {path.name}: OCR failed ({exc})", flush=True)
+        loaded = await _load_document(path, use_ocr, embedder)
+        if loaded is None:
             continue
-        except Exception as exc:
-            print(f"  skipping {path.name}: {type(exc).__name__}", flush=True)
-            continue
-        if not chunk_texts:
-            print(f"  skipping {path.name}: no text", flush=True)
-            continue
-        batch = await embedder.embed(chunk_texts, task=EmbeddingTask.PASSAGE)
+        text, embedding = loaded
         names.append(path.name)
-        texts.append(f"{path.name}\n{chunk_texts[0][:_LEAD_TEXT_CHARS]}")
-        pooled.append(np.asarray(batch.vectors, dtype=np.float64).mean(axis=0))
+        texts.append(text)
+        pooled.append(embedding)
 
     print(f"clustering {len(names)} documents (selection={selection}) ...", flush=True)
     result = cluster_documents(texts, np.stack(pooled), cluster_selection_method=selection)
