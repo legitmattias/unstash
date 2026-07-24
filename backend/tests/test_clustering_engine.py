@@ -148,3 +148,47 @@ def test_leaf_selection_recovers_planted_blobs_too():
     # and numba-compiled UMAP varies slightly across CPU generations, so the
     # bound is looser than the EOM test's.
     assert adjusted_rand_score(truth, result.assignments) > 0.75
+
+
+def test_duplicate_batch_stays_one_cluster():
+    # Batches of (near-)identical documents (same form, one per unit) are a
+    # real archive pattern; more duplicates than n_neighbors is a documented
+    # UMAP hazard, handled with unique=True. Regression guard: the batch
+    # must stay together and must not land in noise.
+    texts, embeddings, truth = _planted_corpus()
+    rng = np.random.default_rng(3)
+    form_vector = rng.normal(size=_DIM) * 10.0
+    n_forms = 17
+    form_texts = [f"energideklaration form {i}" for i in range(n_forms)]
+    # Half exact duplicates, half near-duplicates — both occur in practice.
+    jitter = rng.normal(size=(n_forms, _DIM)) * 1e-4
+    jitter[: n_forms // 2] = 0.0
+    form_embeddings = form_vector + jitter
+
+    all_texts = texts + form_texts
+    all_embeddings = np.vstack([embeddings, form_embeddings])
+    result = cluster_documents(all_texts, all_embeddings)
+
+    form_assignments = result.assignments[len(texts) :]
+    assert len(set(form_assignments)) == 1, "duplicate batch split across clusters"
+    assert form_assignments[0] != -1, "duplicate batch fell out as noise"
+    # The original planted structure is unaffected by the extra batch.
+    assert adjusted_rand_score(truth, result.assignments[: len(texts)]) > 0.75
+
+
+def test_min_cluster_size_is_capped_for_large_corpora():
+    texts, embeddings, _ = _planted_corpus()
+    # Inflate to ~180 docs by jittered copies that stay distinct (> duplicate
+    # threshold apart) so the cap, not the collapse, is exercised.
+    rng = np.random.default_rng(5)
+    big_texts = list(texts)
+    extra = []
+    for i in range(120):
+        base = embeddings[i % len(texts)]
+        extra.append(base + rng.normal(size=_DIM) * 2.0)
+        big_texts.append(f"{texts[i % len(texts)]} kopia {i}")
+    big_embeddings = np.vstack([embeddings, np.array(extra)])
+
+    result = cluster_documents(big_texts, big_embeddings)
+    assert result.params["min_cluster_size"] <= 8
+    assert result.params["min_samples"] <= 5

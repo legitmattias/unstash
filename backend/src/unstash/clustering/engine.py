@@ -35,7 +35,14 @@ if TYPE_CHECKING:
 
 _RANDOM_STATE = 42
 _MIN_CLUSTER_FLOOR = 3
+# Real archives are long-tailed: many genuine categories hold well under
+# n/15 documents, so the scaled minimum is capped or they all become noise.
+_MIN_CLUSTER_CAP = 8
 _DOCS_PER_MIN_CLUSTER = 15
+# Density bar for core points, set independently of min_cluster_size —
+# the hdbscan default couples them, and at min_cluster_size 8-13 that
+# density requirement pushes long-tail categories into noise wholesale.
+_MIN_SAMPLES = 5
 _MAX_N_NEIGHBORS = 15
 _MAX_UMAP_COMPONENTS = 5
 _TOP_KEYWORDS = 10
@@ -117,19 +124,25 @@ def cluster_documents(
     norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
     normalized = embeddings / np.maximum(norms, 1e-12)
 
-    min_cluster_size = max(_MIN_CLUSTER_FLOOR, n // _DOCS_PER_MIN_CLUSTER)
+    min_cluster_size = max(_MIN_CLUSTER_FLOOR, min(_MIN_CLUSTER_CAP, n // _DOCS_PER_MIN_CLUSTER))
+    min_samples = min(_MIN_SAMPLES, min_cluster_size)
     n_neighbors = min(_MAX_N_NEIGHBORS, max(2, n // 5))
     n_components = min(_MAX_UMAP_COMPONENTS, n - 2)
 
+    # unique=True deduplicates identical rows before the neighbour graph and
+    # maps results back — more duplicates than n_neighbors otherwise scatters
+    # identical points across the embedding (umap-learn FAQ).
     umap_model = UMAP(
         n_neighbors=n_neighbors,
         n_components=n_components,
         min_dist=0.0,
         metric="cosine",
         random_state=_RANDOM_STATE,
+        unique=True,
     )
     hdbscan_model = HDBSCAN(
         min_cluster_size=min_cluster_size,
+        min_samples=min_samples,
         metric="euclidean",
         cluster_selection_method=cluster_selection_method,
     )
@@ -177,13 +190,15 @@ def cluster_documents(
     # clustered, over non-noise documents; it is undefined for fewer than
     # two clusters or when every non-noise document is a centroid.
     silhouette: float | None = None
-    reduced = np.asarray(umap_model.embedding_)
+    umap_space = np.asarray(umap_model.embedding_)
     non_noise = labels != -1
     if len(keywords) >= _MIN_CLUSTERS_FOR_SILHOUETTE and int(non_noise.sum()) > len(keywords):
-        silhouette = float(silhouette_score(reduced[non_noise], labels[non_noise]))
+        silhouette = float(silhouette_score(umap_space[non_noise], labels[non_noise]))
 
     params: dict[str, Any] = {
         "n_documents": n,
+        "min_samples": min_samples,
+        "umap_unique": True,
         "min_cluster_size": min_cluster_size,
         "n_neighbors": n_neighbors,
         "n_components": n_components,
