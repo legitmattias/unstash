@@ -137,3 +137,11 @@ def test_keywords_exclude_stop_words_and_keep_diacritics():
     assert not (all_terms & banned), f"stop words leaked into keywords: {all_terms & banned}"
     # Diacritics survive tokenization end-to-end.
     assert any("å" in t or "ä" in t or "ö" in t for t in all_terms), all_terms
+
+
+def test_leaf_selection_recovers_planted_blobs_too():
+    texts, embeddings, truth = _planted_corpus()
+    result = cluster_documents(texts, embeddings, cluster_selection_method="leaf")
+
+    assert result.params["cluster_selection_method"] == "leaf"
+    assert adjusted_rand_score(truth, result.assignments) > 0.9
