@@ -35,6 +35,7 @@ Each ADR follows Michael Nygard's structure:
 | [0010](./0010-reliable-ingestion.md) | Reliable Document Ingestion (durable jobs, retry ladder, dead-letter, reconciliation) | Accepted |
 | [0011](./0011-llm-gateway-and-observability.md) | LLM Calls — In-Process Gateway and Call-Level Observability | Accepted |
 | [0012](./0012-evaluation-model-roles.md) | Evaluation Model Roles | Accepted |
+| [0013](./0013-clustering-method.md) | Clustering Method — HDBSCAN with Stable Extraction | Accepted |
 
 ## Creating a new ADR
 
