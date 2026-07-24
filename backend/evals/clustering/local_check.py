@@ -13,6 +13,8 @@ Markdown, plain text). Files that fail to parse are skipped with a notice.
     ... --selection leaf        # compare extraction granularity
     ... --max-files 200         # bound a large directory
     MISTRAL_API_KEY=... ... --ocr   # OCR scanned PDFs via the production fallback
+    ... --sample-seed 7             # seeded random sample instead of path order
+    MISTRAL_API_KEY=... ... --label # LLM labels via the production labeler
 
 OCR results are cached under ~/.cache/unstash-local-eval/ocr keyed on file
 content, so re-runs do not re-pay the OCR call. The cache lives outside the
@@ -43,8 +45,19 @@ OCR_MAX_BYTES = 50 * 1024 * 1024
 OCR_CACHE = Path.home() / ".cache" / "unstash-local-eval" / "ocr"
 
 
-def _find_files(corpus_dir: Path, max_files: int) -> list[Path]:
-    return sorted(p for p in corpus_dir.rglob("*") if p.suffix.lower() in SUFFIXES)[:max_files]
+def _find_files(corpus_dir: Path, max_files: int, sample_seed: int | None) -> list[Path]:
+    """All supported files, either path-ordered or a seeded random sample.
+
+    Path order concentrates on one subtree; a seeded sample spans the whole
+    archive, which is the representative test.
+    """
+    all_files = sorted(p for p in corpus_dir.rglob("*") if p.suffix.lower() in SUFFIXES)
+    if sample_seed is None or len(all_files) <= max_files:
+        return all_files[:max_files]
+    import random
+
+    rng = random.Random(sample_seed)
+    return sorted(rng.sample(all_files, max_files))
 
 
 async def _chunk_texts_with_ocr(path: Path, use_ocr: bool) -> list[str] | None:
@@ -81,16 +94,50 @@ async def _chunk_texts_with_ocr(path: Path, use_ocr: bool) -> list[str] | None:
     return [c.text for c in ocr_parsed.chunks] or None
 
 
-async def main(corpus_dir: Path, selection: str, max_files: int, use_ocr: bool) -> None:
+async def _llm_labels(result, names: list[str], texts: list[str]) -> dict[int, str]:
+    """One production-labeler call per cluster; failures keep keyword labels."""
+    from unstash.clustering.labeler import LabelError, LabelRequest
+    from unstash.inference.litellm_chat import LiteLlmLabeler
+
+    class _Settings:
+        labeler_model = "mistral/mistral-small-2603"
+        mistral_api_key = os.environ["MISTRAL_API_KEY"]
+        labeler_timeout_seconds = 30.0
+
+    labeler = LiteLlmLabeler(_Settings())  # type: ignore[arg-type]
+    labels: dict[int, str] = {}
+    for cluster_id, terms in sorted(result.keywords.items()):
+        reps = result.representatives[cluster_id]
+        request = LabelRequest(
+            keywords=[t for t, _ in terms],
+            representative_titles=[texts[i].split("\n", 1)[0] for i in reps],
+            representative_excerpts=[texts[i].split("\n", 1)[-1][:200] for i in reps],
+            language="sv",
+        )
+        try:
+            labels[cluster_id] = (await labeler.label(request)).label
+        except LabelError as exc:
+            print(f"  labeling cluster {cluster_id} failed: {exc}", flush=True)
+    return labels
+
+
+async def main(
+    corpus_dir: Path,
+    selection: str,
+    max_files: int,
+    use_ocr: bool,
+    sample_seed: int | None,
+    use_labels: bool,
+) -> None:
     from unstash.clustering.engine import cluster_documents, keyword_label
     from unstash.documents.embedder import EmbeddingTask
     from unstash.documents.ocr import OcrError
 
-    if use_ocr and not os.environ.get("MISTRAL_API_KEY"):
-        sys.exit("MISTRAL_API_KEY is required with --ocr")
+    if (use_ocr or use_labels) and not os.environ.get("MISTRAL_API_KEY"):
+        sys.exit("MISTRAL_API_KEY is required with --ocr / --label")
     OCR_CACHE.mkdir(parents=True, exist_ok=True)
 
-    files = await asyncio.to_thread(_find_files, corpus_dir, max_files)
+    files = await asyncio.to_thread(_find_files, corpus_dir, max_files, sample_seed)
     if not files:
         sys.exit(f"no supported documents under {corpus_dir}")
     print(f"parsing and embedding {len(files)} documents ...", flush=True)
@@ -119,12 +166,15 @@ async def main(corpus_dir: Path, selection: str, max_files: int, use_ocr: bool) 
     print(f"clustering {len(names)} documents (selection={selection}) ...", flush=True)
     result = cluster_documents(texts, np.stack(pooled), cluster_selection_method=selection)
 
+    llm_labels = await _llm_labels(result, names, texts) if use_labels else {}
+
     noise = [names[i] for i, a in enumerate(result.assignments) if a == -1]
     print(f"\nclusters: {len(result.keywords)}  noise: {len(noise)}/{len(names)}")
     print(f"silhouette (umap space): {result.silhouette}")
     for cluster_id, terms in sorted(result.keywords.items()):
         members = [names[i] for i, a in enumerate(result.assignments) if a == cluster_id]
-        print(f"\n[{cluster_id}] {len(members)} docs  «{keyword_label(terms)}»")
+        shown = llm_labels.get(cluster_id, keyword_label(terms))
+        print(f"\n[{cluster_id}] {len(members)} docs  «{shown}»")
         for name in sorted(members):
             print(f"    {name}")
     if noise:
@@ -139,5 +189,11 @@ if __name__ == "__main__":
     parser.add_argument("--selection", choices=["eom", "leaf"], default="eom")
     parser.add_argument("--max-files", type=int, default=500)
     parser.add_argument("--ocr", action="store_true")
+    parser.add_argument("--sample-seed", type=int, default=None)
+    parser.add_argument("--label", action="store_true")
     args = parser.parse_args()
-    asyncio.run(main(args.corpus_dir, args.selection, args.max_files, args.ocr))
+    asyncio.run(
+        main(
+            args.corpus_dir, args.selection, args.max_files, args.ocr, args.sample_seed, args.label
+        )
+    )
