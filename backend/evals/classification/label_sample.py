@@ -15,9 +15,17 @@ session can be stopped and continued at any point.
 
     python evals/classification/label_sample.py \
         --corpus-dir /path/to/documents --out labels.jsonl
+    MISTRAL_API_KEY=... ... --ocr    # read scanned documents too
 
-Nothing leaves the machine: snippets come from local parsing, and the
-output file stays wherever the operator puts it.
+**Why --ocr matters for validity**: scanned documents parse to no text, so
+without OCR the operator sees only the filename and path — exactly the
+evidence the rules use — and the gold set becomes circular for those
+documents. With OCR the operator judges from content. Either way each row
+records ``had_content``, so the analysis can report the uncontaminated
+subset separately.
+
+Nothing leaves the machine except scanned pages sent to the OCR provider
+(the same one ingestion uses); snippets and labels stay local.
 """
 
 from __future__ import annotations
@@ -26,6 +34,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import os
 import random
 import sys
 from pathlib import Path
@@ -38,8 +47,16 @@ sys.path.insert(0, str(HERE))
 from taxonomy import ADJUDICATION_ESCAPES, TYPES
 
 SUFFIXES = {".pdf", ".docx", ".md", ".txt"}
-SNIPPET_CACHE = Path.home() / ".cache" / "unstash-local-eval" / "snippet"
+CACHE_ROOT = Path.home() / ".cache" / "unstash-local-eval"
+SNIPPET_CACHE = CACHE_ROOT / "snippet"
+# Shared with the clustering local check, so scans OCR'd there are free here.
+OCR_CACHE = CACHE_ROOT / "ocr"
 SNIPPET_CHARS = 400
+OCR_MIN_CHARS_PER_PAGE = 200
+OCR_MAX_BYTES = 50 * 1024 * 1024
+# Marker for documents that yielded no readable content; stored in the
+# snippet cache so the state survives restarts.
+NO_CONTENT = "[no readable text]"
 # Families worth over-sampling: they are the cases where filename rules are
 # most likely to be either very right or very wrong.
 HARD_FAMILY_TERMS = ("energidekl", "anlaggning", "anläggning", "hus ", "protokoll")
@@ -63,19 +80,47 @@ def _sample(files: list[Path], size: int, seed: int) -> list[Path]:
     return chosen
 
 
-async def _snippet(path: Path) -> str:
-    """First lines of extracted text, cached on disk by file content."""
+async def _snippet(path: Path, use_ocr: bool) -> str:
+    """Leading extracted text, cached by file content; OCR for scans.
+
+    Returns :data:`NO_CONTENT` when nothing readable could be produced —
+    the operator then has only the filename and path to judge from, which
+    the caller records so those rows can be analysed separately.
+    """
+    from unstash.documents.ocr import needs_ocr, ocr_pdf_to_markdown
     from unstash.documents.parser import parse_to_chunks
 
     digest = hashlib.sha256(await asyncio.to_thread(path.read_bytes)).hexdigest()
     cached = SNIPPET_CACHE / f"{digest}.txt"
     if cached.exists():
         return await asyncio.to_thread(cached.read_text, "utf-8")
+
+    text = NO_CONTENT
     try:
         parsed = await asyncio.to_thread(parse_to_chunks, path)
-        text = parsed.chunks[0].text[:SNIPPET_CHARS] if parsed.chunks else ""
+        scanned = path.suffix.lower() == ".pdf" and needs_ocr(
+            page_count=parsed.page_count,
+            total_chars=parsed.total_chars,
+            min_chars_per_page=OCR_MIN_CHARS_PER_PAGE,
+        )
+        if not scanned and parsed.chunks:
+            text = parsed.chunks[0].text[:SNIPPET_CHARS]
+        elif scanned and use_ocr:
+            ocr_path = OCR_CACHE / f"{digest}.md"
+            if not ocr_path.exists():
+                markdown = await ocr_pdf_to_markdown(
+                    path,
+                    api_key=os.environ["MISTRAL_API_KEY"],
+                    base_url="https://api.mistral.ai",
+                    model="mistral-ocr-latest",
+                    max_bytes=OCR_MAX_BYTES,
+                    timeout=120.0,
+                )
+                await asyncio.to_thread(ocr_path.write_text, markdown, "utf-8")
+            ocr_text = await asyncio.to_thread(ocr_path.read_text, "utf-8")
+            text = ocr_text[:SNIPPET_CHARS].strip() or NO_CONTENT
     except Exception as exc:
-        text = f"[could not parse: {type(exc).__name__}]"
+        text = f"[could not read: {type(exc).__name__}]"
     await asyncio.to_thread(cached.write_text, text, "utf-8")
     return text
 
@@ -100,8 +145,11 @@ def _print_menu() -> None:
     print("\n    m = more text   s = skip   q = save and quit")
 
 
-async def main(corpus_dir: Path, out_path: Path, size: int, seed: int) -> None:
+async def main(corpus_dir: Path, out_path: Path, size: int, seed: int, use_ocr: bool) -> None:
+    if use_ocr and not os.environ.get("MISTRAL_API_KEY"):
+        sys.exit("MISTRAL_API_KEY is required with --ocr")
     SNIPPET_CACHE.mkdir(parents=True, exist_ok=True)
+    OCR_CACHE.mkdir(parents=True, exist_ok=True)
     files = _all_files(corpus_dir)
     if not files:
         sys.exit(f"no supported documents under {corpus_dir}")
@@ -113,16 +161,23 @@ async def main(corpus_dir: Path, out_path: Path, size: int, seed: int) -> None:
 
     if todo:
         print("pre-fetching snippets (one-off; cached afterwards) ...", flush=True)
+        no_content = 0
         for index, path in enumerate(todo, start=1):
-            await _snippet(path)
-            if index % 10 == 0:
-                print(f"  {index}/{len(todo)}", flush=True)
+            snippet = await _snippet(path, use_ocr)
+            if snippet == NO_CONTENT:
+                no_content += 1
+            print(f"  {index}/{len(todo)}  {path.name[:56]}", flush=True)
+        if no_content:
+            print(
+                f"\n  {no_content}/{len(todo)} documents yielded no readable text"
+                + ("" if use_ocr else " — re-run with --ocr to read scans")
+            )
 
     options = [*TYPES, *ADJUDICATION_ESCAPES]
     with out_path.open("a", encoding="utf-8") as out:
         for index, path in enumerate(todo, start=1):
             relpath = str(path.relative_to(corpus_dir))
-            snippet = await _snippet(path)
+            snippet = await _snippet(path, use_ocr)
             print("\n" + "=" * 72)
             print(f"[{index}/{len(todo)}]  {path.name}")
             print(f"  path: {relpath}")
@@ -146,6 +201,8 @@ async def main(corpus_dir: Path, out_path: Path, size: int, seed: int) -> None:
                                 "relpath": relpath,
                                 "name": path.name,
                                 "label": options[int(answer) - 1],
+                                "had_content": snippet != NO_CONTENT
+                                and not snippet.startswith("[could not read"),
                             },
                             ensure_ascii=False,
                         )
@@ -164,5 +221,6 @@ if __name__ == "__main__":
     parser.add_argument("--out", type=Path, default=Path("labels.jsonl"))
     parser.add_argument("--sample-size", type=int, default=150)
     parser.add_argument("--seed", type=int, default=11)
+    parser.add_argument("--ocr", action="store_true")
     args = parser.parse_args()
-    asyncio.run(main(args.corpus_dir, args.out, args.sample_size, args.seed))
+    asyncio.run(main(args.corpus_dir, args.out, args.sample_size, args.seed, args.ocr))

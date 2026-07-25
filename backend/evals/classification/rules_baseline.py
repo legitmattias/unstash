@@ -179,6 +179,24 @@ def main(labels_path: Path) -> None:
     for threshold, covered, accuracy in coverage_table(scored):
         print(f"  {threshold:>9.2f} {covered / len(scored):>8.1%} {accuracy:>9.1%}")
 
+    # Rows labelled without readable content were judged from filename and
+    # path alone — the same evidence the rules use — so they cannot
+    # independently confirm the rules. The content-backed subset is the
+    # uncontaminated measurement.
+    with_content = [r for r in scored if r.get("had_content", True)]
+    without = len(scored) - len(with_content)
+    if without:
+        print(
+            f"\n  {without}/{len(scored)} rows were labelled without readable content"
+            " (filename/path only — not independent evidence)"
+        )
+        if with_content:
+            print("  content-backed subset only:")
+            print(f"  {'threshold':>9} {'coverage':>9} {'accuracy':>9}")
+            for threshold, covered, accuracy in coverage_table(with_content):
+                share = covered / len(with_content)
+                print(f"  {threshold:>9.2f} {share:>8.1%} {accuracy:>9.1%}")
+
     print("\n  ablation at threshold 0.5:")
     for label, kwargs in (
         ("filename only", {"use_filename": True, "use_path": False}),
