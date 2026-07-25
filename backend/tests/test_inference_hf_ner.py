@@ -101,3 +101,26 @@ async def test_missing_endpoint_url_raises() -> None:
     extractor = HfEndpointExtractor(endpoint_url="", api_key="k", min_score=0.7, timeout=5.0)
     with pytest.raises(NerError, match="not configured"):
         await extractor.extract("...")
+
+
+async def test_retries_through_scale_transition_409(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A scale-to-zero endpoint answers 409 "workload is not stopped" while a
+    # previous scale-down is still settling; that is transient, not a
+    # client error.
+    monkeypatch.setattr(hf_module, "_backoff_seconds", _no_backoff)
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        _ = request
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            return httpx.Response(
+                409,
+                json={"error": "Conflict: workload is not stopped", "code": "CONFLICT"},
+            )
+        return httpx.Response(200, json=[{"entity_group": "PER", "word": "Erik", "score": 0.9}])
+
+    _install_transport(monkeypatch, handler)
+    entities = await _extractor().extract("...")
+    assert [e.text for e in entities] == ["Erik"]
+    assert calls["n"] == 3

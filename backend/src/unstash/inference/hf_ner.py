@@ -18,13 +18,15 @@ import httpx
 
 from unstash.documents.ner import ExtractedEntity, entities_from_tagged
 
-# A scale-to-zero endpoint returns 503 while the replica cold-starts, so 503
-# is retried alongside the usual transient statuses. Capped exponential
-# backoff over these attempts sums to ~2 minutes (1+2+4+8+16+30+30+30), the
-# cold-start window for the replica. NER is best-effort: on exhaustion the
-# document is indexed without entities.
-_RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
-_MAX_RETRIES = 8
+# A scale-to-zero endpoint returns 503 while the replica cold-starts and 409
+# ("workload is not stopped") while a previous scale-down is still settling,
+# so both are retried alongside the usual transient statuses. Capped
+# exponential backoff over these attempts sums to ~5 minutes
+# (1+2+4+8+16, then 30 each), covering a CPU replica that boots and pulls model
+# weights. NER is best-effort: on exhaustion the document is indexed
+# without entities.
+_RETRYABLE_STATUS = frozenset({409, 429, 500, 502, 503, 504})
+_MAX_RETRIES = 15
 _BACKOFF_CAP_SECONDS = 30.0
 
 
