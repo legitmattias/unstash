@@ -37,12 +37,18 @@ _RANDOM_STATE = 42
 _MIN_CLUSTER_FLOOR = 3
 # Real archives are long-tailed: many genuine categories hold well under
 # n/15 documents, so the scaled minimum is capped or they all become noise.
+# Cap and min_samples from the 2026-07 real-corpus parameter sweep,
+# validated by folder-agreement ARI (clusters vs the archive's own folder
+# structure, unseen by the clustering).
 _MIN_CLUSTER_CAP = 8
 _DOCS_PER_MIN_CLUSTER = 15
 # Density bar for core points, set independently of min_cluster_size —
 # the hdbscan default couples them, and at min_cluster_size 8-13 that
 # density requirement pushes long-tail categories into noise wholesale.
-_MIN_SAMPLES = 5
+# Higher values also smooth real-corpus density into one catch-all basin
+# (at 5: one 84% mega-cluster, folder-ARI 0.05); 3 keeps local peaks
+# distinct (folder-ARI 0.33, largest cluster 71% folder-pure).
+_MIN_SAMPLES = 3
 _MAX_N_NEIGHBORS = 15
 _MAX_UMAP_COMPONENTS = 5
 _TOP_KEYWORDS = 10
