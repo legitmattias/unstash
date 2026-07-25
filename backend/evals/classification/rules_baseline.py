@@ -155,6 +155,13 @@ def learned_model(rows: list[dict]) -> None:
 
 
 def main(labels_path: Path) -> None:
+    if not labels_path.exists():
+        sys.exit(
+            f"no label file at {labels_path}\n"
+            "Collect a gold set first:\n"
+            "  python evals/classification/label_sample.py "
+            f"--corpus-dir /path/to/documents --out {labels_path}"
+        )
     rows = [
         json.loads(line)
         for line in labels_path.read_text(encoding="utf-8").splitlines()
