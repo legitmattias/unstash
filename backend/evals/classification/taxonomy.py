@@ -30,6 +30,7 @@ TYPES: tuple[str, ...] = (
     "faktura",
     "ritning",
     "besiktning",
+    "tillsyn",
     "energideklaration",
     "medlemsinfo",
     "stadgar_regler",
@@ -127,15 +128,29 @@ LEXICON: dict[str, tuple[str, ...]] = {
         "rorgrav",
         "rörgrav",
     ),
+    # Formal inspection by an external, often certified party: carries
+    # contractual or statutory weight (warranty periods, mandatory checks).
     "besiktning": (
         "besiktning",
         "slutbesiktning",
         "garantibesiktning",
+        "overlatelsebesiktning",
+        "överlåtelsebesiktning",
+        "markbesiktning",
         "ovk",
-        "tillsyn",
-        "utlatande",
-        "utlåtande",
+        "ledningsinspektion",
+        "radon",
         "inspektion",
+    ),
+    # Internal property or apartment oversight run by the board or the
+    # property manager: a separate recurring activity from besiktning, with
+    # different actors, purpose and consequences.
+    "tillsyn": (
+        "tillsyn",
+        "lagenhetstillsyn",
+        "lägenhetstillsyn",
+        "egenkontroll",
+        "statuskontroll",
     ),
     "energideklaration": (
         "energideklaration",
@@ -176,7 +191,10 @@ AMBIGUOUS_TERMS: dict[str, tuple[str, ...]] = {
     "protokoll": ("protokoll_styrelse", "protokoll_stamma", "besiktning"),
     "kallelse": ("protokoll_stamma", "protokoll_styrelse"),
     "bilaga": ("protokoll_styrelse", "protokoll_stamma"),
-    "rapport": ("ekonomi_ovrigt", "besiktning"),
+    "rapport": ("ekonomi_ovrigt", "besiktning", "tillsyn"),
+    "utlatande": ("besiktning", "tillsyn"),
+    "utlåtande": ("besiktning", "tillsyn"),
+    "kontroll": ("besiktning", "tillsyn"),
     "plan": ("ritning", "ekonomi_ovrigt"),
     "hus": ("ritning",),
 }
