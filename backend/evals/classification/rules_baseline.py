@@ -43,6 +43,8 @@ WEIGHT_PARENT = 0.6
 WEIGHT_ANCESTOR = 0.35
 AMBIGUOUS_FACTOR = 0.5
 THRESHOLDS = (0.0, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
+# Below this many gold examples a per-type rate is noise, not a measurement.
+MIN_PER_TYPE_FOR_RATE = 5
 _DELIMITERS = re.compile(r"[_\-.,()\[\]{}+]+")
 
 
@@ -221,9 +223,13 @@ def main(labels_path: Path) -> None:
         total = len(results) + missed[doc_type]
         if total == 0:
             continue
+        if total < MIN_PER_TYPE_FOR_RATE:
+            print(f"    {doc_type:<22} n={total:>3}  insufficient evidence")
+            continue
         accuracy = f"{sum(results) / len(results):>6.1%}" if results else "     —"
         print(
-            f"    {doc_type:<20} n={total:>3}  covered {len(results) / total:>6.1%}  accuracy {accuracy}"
+            f"    {doc_type:<22} n={total:>3}  covered {len(results) / total:>6.1%}"
+            f"  accuracy {accuracy}"
         )
 
     print("\ntier 2 — learned character n-gram model over filename + path")

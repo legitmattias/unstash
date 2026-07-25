@@ -34,7 +34,10 @@ TYPES: tuple[str, ...] = (
     "energideklaration",
     "medlemsinfo",
     "stadgar_regler",
-    "lagenhetsdokument",
+    "lagenhetsforteckning",
+    "overlatelse",
+    "pantsattning",
+    "andrahandsuthyrning",
     "ovrigt",
 )
 
@@ -171,17 +174,36 @@ LEXICON: dict[str, tuple[str, ...]] = {
         "policy",
         "riktlinjer",
     ),
-    "lagenhetsdokument": (
-        "lagenhetsdokument",
-        "lägenhetsdokument",
+    # The apartment-related types below were briefly collapsed into one
+    # "lägenhetsdokument" bucket. That was a subject grouping, not a type:
+    # the sector's retention guidance assigns each of these a different
+    # retention rule, which is only possible if they are distinct types.
+    "lagenhetsforteckning": (
         "lagenhetsforteckning",
         "lägenhetsförteckning",
-        "andrahandsuthyrning",
+        "lagenhetsdokument",
+        "lägenhetsdokument",
+        "medlemsforteckning",
+        "medlemsförteckning",
+    ),
+    "overlatelse": (
         "overlatelse",
         "överlåtelse",
+        "upplatelse",
+        "upplåtelse",
+        "maklarblankett",
+        "mäklarblankett",
+    ),
+    "pantsattning": (
         "pantsattning",
         "pantsättning",
-        "nyckelkvittens",
+        "pantforskrivning",
+        "pantförskrivning",
+    ),
+    "andrahandsuthyrning": (
+        "andrahandsuthyrning",
+        "andrahand",
+        "uthyrning",
     ),
 }
 
