@@ -31,7 +31,13 @@ TYPES: tuple[str, ...] = (
     "ritning",
     "besiktning",
     "tillsyn",
+    "utredning",
+    "korrespondens",
+    "ansokan_arende",
     "energideklaration",
+    "produktdokumentation",
+    "skadeanmalan",
+    "nyckelkvittens",
     "medlemsinfo",
     "stadgar_regler",
     "lagenhetsforteckning",
@@ -79,6 +85,9 @@ LEXICON: dict[str, tuple[str, ...]] = {
     ),
     "ekonomi_ovrigt": (
         "budget",
+        "kalkyl",
+        "underhallsplan",
+        "underhållsplan",
         "ekonomisk rapport",
         "forvaltningsrapport",
         "förvaltningsrapport",
@@ -155,9 +164,88 @@ LEXICON: dict[str, tuple[str, ...]] = {
         "egenkontroll",
         "statuskontroll",
     ),
+    # Commissioned investigation or technical report from an external party
+    # (damp, mould, pest control, pipes, measurements). Distinct from
+    # besiktning: no contractual or statutory standing, and from tillsyn:
+    # performed by an outside specialist, not the board. The vertical's own
+    # folder naming ("Avtal, Utredningar, Anbud") treats it as a peer of
+    # contracts and tenders.
+    "utredning": (
+        "utredning",
+        "provtagning",
+        "matning",
+        "mätning",
+        "analys",
+        "sanering",
+        "mogel",
+        "mögel",
+        "fuktutredning",
+        "skadedjur",
+        "statusrapport",
+    ),
+    # Two-way communication with an individual or organisation, as opposed
+    # to medlemsinfo, which is outbound broadcast to all members.
+    "korrespondens": (
+        "brev",
+        "skrivelse",
+        "e-post",
+        "epost",
+        "meddelande",
+        "svar till",
+        "korrespondens",
+    ),
+    # A member (or the association) applies, and the board decides:
+    # renovations, glazing, accessibility adaptations, permissions.
+    "ansokan_arende": (
+        "ansokan",
+        "ansökan",
+        "begaran",
+        "begäran",
+        "medgivande",
+        "godkannande",
+        "godkännande",
+        "tillbyggnadshandling",
+        "ombyggnation",
+        "bygglov",
+    ),
     "energideklaration": (
         "energideklaration",
         "energidekl",
+    ),
+    # Manufacturer and supplier literature received with an installation:
+    # manuals, maintenance instructions, datasheets, product declarations.
+    "produktdokumentation": (
+        "bruksanvisning",
+        "skotselanvisning",
+        "skötselanvisning",
+        "skotsel",
+        "skötsel",
+        "monteringsanvisning",
+        "driftinstruktion",
+        "anvisning",
+        "produktblad",
+        "datablad",
+        "broschyr",
+        "byggvarudeklaration",
+    ),
+    # Reporting damage, loss or an incident to an insurer or authority.
+    # The incident itself is an event facet, not a type: a burglary produces
+    # a police report, a claim, repair offers and photographs.
+    "skadeanmalan": (
+        "skadeanmalan",
+        "skadeanmälan",
+        "polisanmalan",
+        "polisanmälan",
+        "forsakringsarende",
+        "försäkringsärende",
+        "skadereglering",
+        "inbrott",
+        "vattenskada",
+    ),
+    "nyckelkvittens": (
+        "nyckelkvittens",
+        "nyckelkvitto",
+        "nyckelkvitt",
     ),
     "medlemsinfo": (
         "medlemsbrev",
@@ -213,7 +301,8 @@ AMBIGUOUS_TERMS: dict[str, tuple[str, ...]] = {
     "protokoll": ("protokoll_styrelse", "protokoll_stamma", "besiktning"),
     "kallelse": ("protokoll_stamma", "protokoll_styrelse"),
     "bilaga": ("protokoll_styrelse", "protokoll_stamma"),
-    "rapport": ("ekonomi_ovrigt", "besiktning", "tillsyn"),
+    "rapport": ("ekonomi_ovrigt", "besiktning", "tillsyn", "utredning"),
+    "intyg": ("korrespondens", "besiktning"),
     "utlatande": ("besiktning", "tillsyn"),
     "utlåtande": ("besiktning", "tillsyn"),
     "kontroll": ("besiktning", "tillsyn"),
