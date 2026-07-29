@@ -51,7 +51,12 @@ CACHE_ROOT = Path.home() / ".cache" / "unstash-local-eval"
 SNIPPET_CACHE = CACHE_ROOT / "snippet"
 # Shared with the clustering local check, so scans OCR'd there are free here.
 OCR_CACHE = CACHE_ROOT / "ocr"
-SNIPPET_CHARS = 400
+# Cache generously so changing what is displayed never forces a re-parse.
+# The operator establishes ground truth and should never have less evidence
+# than the classifier being measured (whose designed window is ~500 tokens
+# of leading text plus filename and structural features).
+SNIPPET_CHARS = 4000
+PREVIEW_CHARS = 600
 OCR_MIN_CHARS_PER_PAGE = 200
 OCR_MAX_BYTES = 50 * 1024 * 1024
 # Marker for documents that yielded no readable content; stored in the
@@ -142,10 +147,13 @@ def _print_menu() -> None:
     for index, name in enumerate(options, start=1):
         end = "\n" if index % 3 == 0 else ""
         print(f"    {index:>2}. {name:<{width}}", end=end)
-    print("\n    m = more text   s = skip   q = save and quit")
+    print("\n    m = full text   s = skip   q = save and quit")
+    print("    (open the file itself whenever that settles it — this is ground truth)")
 
 
-async def main(corpus_dir: Path, out_path: Path, size: int, seed: int, use_ocr: bool) -> None:
+async def main(  # noqa: PLR0912 — a linear interactive loop; splitting hurts readability
+    corpus_dir: Path, out_path: Path, size: int, seed: int, use_ocr: bool
+) -> None:
     if use_ocr and not os.environ.get("MISTRAL_API_KEY"):
         sys.exit("MISTRAL_API_KEY is required with --ocr")
     SNIPPET_CACHE.mkdir(parents=True, exist_ok=True)
@@ -181,7 +189,10 @@ async def main(corpus_dir: Path, out_path: Path, size: int, seed: int, use_ocr: 
             print("\n" + "=" * 72)
             print(f"[{index}/{len(todo)}]  {path.name}")
             print(f"  path: {relpath}")
-            print(f"  text: {snippet[:200].replace(chr(10), ' ')}")
+            preview = snippet[:PREVIEW_CHARS].replace(chr(10), " ")
+            print(f"  text: {preview}")
+            if len(snippet) > PREVIEW_CHARS:
+                print(f"        … {len(snippet) - PREVIEW_CHARS} more characters — press m")
             _print_menu()
 
             while True:
@@ -192,7 +203,7 @@ async def main(corpus_dir: Path, out_path: Path, size: int, seed: int, use_ocr: 
                 if answer == "s":
                     break
                 if answer == "m":
-                    print(f"\n  {snippet}")
+                    print(f"\n{snippet}\n")
                     continue
                 if answer.isdigit() and 1 <= int(answer) <= len(options):
                     out.write(
