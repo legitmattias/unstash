@@ -513,3 +513,192 @@ async def test_search_emits_a_stage_trace(
         assert trace[key] >= 0
     # The raw query is never logged — only its length.
     assert "query" not in trace
+
+
+async def test_mime_filter_cannot_surface_another_orgs_document(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """Adversarial: a mime filter runs inside the org scope, never widening it.
+
+    Both orgs hold a PDF matching the query and the filter; org B must see
+    only its own, proving the filter clause narrows within org_id/RLS rather
+    than selecting across tenants.
+    """
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    user_b = await seed_user(migrations_pool, USER_B_EMAIL, USER_PASSWORD)
+    org_a = await seed_org(migrations_pool, "org-a", "Org A")
+    org_b = await seed_org(migrations_pool, "org-b", "Org B")
+    await seed_membership(migrations_pool, user_a, org_a)
+    await seed_membership(migrations_pool, user_b, org_b)
+    text = ["Styrelsen beslutade om takrenovering och budget."]
+    await _seed_indexed_document(
+        migrations_pool,
+        org_a,
+        "protokoll-a.pdf",
+        text,
+        mime_type="application/pdf",
+    )
+    doc_b = await _seed_indexed_document(
+        migrations_pool,
+        org_b,
+        "protokoll-b.pdf",
+        text,
+        mime_type="application/pdf",
+    )
+
+    await login(app_client, USER_B_EMAIL, USER_PASSWORD)
+    response = await app_client.get(
+        "/api/orgs/org-b/search",
+        params={"q": "takrenovering budget", "mime_type": "application/pdf"},
+    )
+    assert response.status_code == 200, response.text
+    ids = [r["document_id"] for r in response.json()["results"]]
+    assert ids == [str(doc_b)]
+
+
+async def test_date_filter_cannot_surface_another_orgs_document(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """Adversarial: a date filter narrows within the org scope, not across it."""
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    user_b = await seed_user(migrations_pool, USER_B_EMAIL, USER_PASSWORD)
+    org_a = await seed_org(migrations_pool, "org-a", "Org A")
+    org_b = await seed_org(migrations_pool, "org-b", "Org B")
+    await seed_membership(migrations_pool, user_a, org_a)
+    await seed_membership(migrations_pool, user_b, org_b)
+    text = ["Föreningens ekonomi och budget för året."]
+    await _seed_indexed_document(
+        migrations_pool,
+        org_a,
+        "budget-a.md",
+        text,
+        dates=["2022-05-01"],
+    )
+    doc_b = await _seed_indexed_document(
+        migrations_pool,
+        org_b,
+        "budget-b.md",
+        text,
+        dates=["2022-05-01"],
+    )
+
+    await login(app_client, USER_B_EMAIL, USER_PASSWORD)
+    response = await app_client.get(
+        "/api/orgs/org-b/search",
+        params={"q": "ekonomi budget", "date_from": "2022-01-01", "date_to": "2022-12-31"},
+    )
+    assert response.status_code == 200, response.text
+    ids = [r["document_id"] for r in response.json()["results"]]
+    assert ids == [str(doc_b)]
+
+
+async def test_combined_mime_and_date_filter_requires_both(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """Both filters are conjunctive: a doc matching only one dimension is excluded."""
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    org_a = await seed_org(migrations_pool, "org-a", "Org A")
+    await seed_membership(migrations_pool, user_a, org_a)
+    text = ["Styrelsen och budget för takrenovering."]
+    match = await _seed_indexed_document(
+        migrations_pool,
+        org_a,
+        "match.pdf",
+        text,
+        mime_type="application/pdf",
+        dates=["2022-04-10"],
+    )
+    await _seed_indexed_document(  # right date, wrong mime
+        migrations_pool,
+        org_a,
+        "wrong-mime.md",
+        text,
+        mime_type="text/markdown",
+        dates=["2022-04-10"],
+    )
+    await _seed_indexed_document(  # right mime, wrong date
+        migrations_pool,
+        org_a,
+        "wrong-date.pdf",
+        text,
+        mime_type="application/pdf",
+        dates=["2023-04-10"],
+    )
+
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    response = await app_client.get(
+        "/api/orgs/org-a/search",
+        params={
+            "q": "budget takrenovering",
+            "mime_type": "application/pdf",
+            "date_from": "2022-01-01",
+            "date_to": "2022-12-31",
+        },
+    )
+    assert response.status_code == 200, response.text
+    ids = [r["document_id"] for r in response.json()["results"]]
+    assert ids == [str(match)]
+
+
+async def test_date_filter_excludes_document_without_extracted_dates(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """A document with no extracted dates is excluded by any date filter."""
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    org_a = await seed_org(migrations_pool, "org-a", "Org A")
+    await seed_membership(migrations_pool, user_a, org_a)
+    text = ["Föreningens ekonomi och budget för året."]
+    dated = await _seed_indexed_document(
+        migrations_pool,
+        org_a,
+        "dated.md",
+        text,
+        dates=["2022-07-01"],
+    )
+    await _seed_indexed_document(  # no document_metadata row at all
+        migrations_pool,
+        org_a,
+        "undated.md",
+        text,
+        dates=None,
+    )
+
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    response = await app_client.get(
+        "/api/orgs/org-a/search",
+        params={"q": "ekonomi budget", "date_from": "2022-01-01", "date_to": "2022-12-31"},
+    )
+    assert response.status_code == 200, response.text
+    ids = [r["document_id"] for r in response.json()["results"]]
+    assert ids == [str(dated)]
+
+
+async def test_partial_month_date_matches_as_first_of_month(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """A ``YYYY-MM`` extracted date is compared as the first of that month."""
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    org_a = await seed_org(migrations_pool, "org-a", "Org A")
+    await seed_membership(migrations_pool, user_a, org_a)
+    text = ["Föreningens ekonomi och budget för året."]
+    doc = await _seed_indexed_document(
+        migrations_pool,
+        org_a,
+        "budget-mars.md",
+        text,
+        dates=["2022-03"],
+    )
+
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
+    response = await app_client.get(
+        "/api/orgs/org-a/search",
+        params={"q": "ekonomi budget", "date_from": "2022-03-01", "date_to": "2022-03-31"},
+    )
+    assert response.status_code == 200, response.text
+    ids = [r["document_id"] for r in response.json()["results"]]
+    assert ids == [str(doc)]
