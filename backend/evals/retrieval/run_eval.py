@@ -33,6 +33,7 @@ sys.path.insert(0, str(HERE.parents[1] / "src"))
 
 import asyncpg
 from metrics import (
+    MIN_CLUSTERS_FOR_CI,
     clustered_bootstrap_ci,
     clustered_paired_test,
     mrr,
@@ -230,11 +231,20 @@ def _stats_lines(
     """Paired comparison and per-slice CIs, resampled by source document."""
     n_clusters_all = len(set(clusters))
 
+    def _withheld_reason(n_clusters: int) -> str:
+        if n_clusters < MIN_CLUSTERS_FOR_CI:
+            return f"interval withheld — {n_clusters} source documents"
+        return "interval withheld — identical scores across documents"
+
     def paired(a: str, b: str, metric: str) -> str:
         mean, low, high, pvalue = clustered_paired_test(
             per_config[a][metric], per_config[b][metric], clusters
         )
-        ci = "interval not reported" if math.isnan(low) else f"95% CI [{low:+.3f}, {high:+.3f}]"
+        ci = (
+            _withheld_reason(n_clusters_all)
+            if math.isnan(low)
+            else f"95% CI [{low:+.3f}, {high:+.3f}]"
+        )
         return f"{mean:+.3f}  {ci}  permutation p={pvalue:.3f}"
 
     lines = [
@@ -252,7 +262,11 @@ def _stats_lines(
         vals = [per_config["rrf"]["all/ndcg@10"][i] for i in idx]
         slice_clusters = [clusters[i] for i in idx]
         mean, low, high = clustered_bootstrap_ci(vals, slice_clusters)
-        ci = "interval not reported" if math.isnan(low) else f"[{low:.3f}, {high:.3f}]"
+        ci = (
+            _withheld_reason(len(set(slice_clusters)))
+            if math.isnan(low)
+            else f"[{low:.3f}, {high:.3f}]"
+        )
         lines.append(
             f"- {cat} (n={len(vals)}, {len(set(slice_clusters))} clusters): {mean:.3f} {ci}"
         )
