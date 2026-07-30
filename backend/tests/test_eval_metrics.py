@@ -98,7 +98,7 @@ def test_clustered_bootstrap_ci_withholds_interval_below_min_clusters() -> None:
 def test_clustering_strictly_widens_the_interval() -> None:
     # Same values; grouping perfectly-correlated query pairs into five documents
     # gives fewer effective units than ten independent queries, so the clustered
-    # interval is strictly wider. Both sides keep >= _MIN_CLUSTERS_FOR_CI clusters.
+    # interval is strictly wider. Both sides keep >= MIN_CLUSTERS_FOR_CI clusters.
     values = [0.9, 0.9, 0.1, 0.1, 0.9, 0.9, 0.1, 0.1, 0.9, 0.1]
     independent = [f"q{i}" for i in range(10)]
     clustered = ["a", "a", "b", "b", "c", "c", "d", "d", "e", "e"]
@@ -142,3 +142,26 @@ def test_clustered_paired_test_statistic_is_query_weighted() -> None:
     assert math.isclose(mean, (0.4 * 3 + 0.1 * 4) / 7, abs_tol=1e-9)
     assert not math.isnan(low)
     assert 0.0 < p < 0.2
+
+
+def test_clustered_bootstrap_ci_withholds_degenerate_interval() -> None:
+    # Eight documents all scoring identically: the cluster-count guard passes,
+    # but every bootstrap replicate is the same value, so the percentile
+    # interval collapses to [1.0, 1.0]. Zero observed variance across clusters
+    # is not zero uncertainty about the population.
+    values = [1.0] * 8
+    clusters = [f"d{i}" for i in range(8)]
+    mean, low, high = clustered_bootstrap_ci(values, clusters)
+    assert math.isclose(mean, 1.0)
+    assert math.isnan(low)
+    assert math.isnan(high)
+
+
+def test_clustered_bootstrap_ci_reports_near_degenerate_interval() -> None:
+    # One cluster differing is enough for the bootstrap to carry information,
+    # so the interval is reported rather than withheld.
+    values = [1.0] * 7 + [0.9]
+    clusters = [f"d{i}" for i in range(8)]
+    _mean, low, high = clustered_bootstrap_ci(values, clusters)
+    assert not math.isnan(low)
+    assert high > low

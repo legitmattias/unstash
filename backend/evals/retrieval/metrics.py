@@ -27,9 +27,14 @@ _PERMUTATIONS = 10_000
 _CONFIDENCE = 0.95
 # Below this many distinct documents the percentile bootstrap is too coarse to
 # trust: a single cluster yields a zero-width interval that reads as false
-# certainty. Withhold the interval instead (NaN sentinel), reported as "not
-# reported". Applies per slice — the english slice carries only 4 clusters.
-_MIN_CLUSTERS_FOR_CI = 5
+# certainty. Withhold the interval instead (NaN sentinel). Applies per slice —
+# the english slice carries only 4 clusters.
+MIN_CLUSTERS_FOR_CI = 5
+# Clusters that all share a mean produce identical bootstrap replicates at any
+# cluster count, so the cluster-count guard alone does not catch them. Intervals
+# narrower than this are withheld on the same grounds. Metrics are bounded in
+# [0, 1], so the bound is far below any meaningful width.
+_DEGENERATE_CI_WIDTH = 1e-12
 
 
 def recall_at_k(ranked: list[str], judgments: dict[str, int], k: int) -> float:
@@ -89,15 +94,21 @@ def clustered_bootstrap_ci(
     the reported figure, not a mean of document-means. The percentile method is
     used rather than BCa: with the 4-9 clusters a slice carries, BCa's
     bias-correction and acceleration are unreliable (and can return NaN).
-    Below ``_MIN_CLUSTERS_FOR_CI`` documents the interval is withheld as
-    ``(mean, nan, nan)`` rather than a falsely-precise number. Returns
-    ``(mean, low, high)`` at the ``_CONFIDENCE`` level.
+    Returns ``(mean, low, high)`` at the ``_CONFIDENCE`` level.
+
+    The interval is withheld as ``(mean, nan, nan)`` in two cases: fewer than
+    ``MIN_CLUSTERS_FOR_CI`` documents, and a degenerate bootstrap distribution.
+    The second arises whenever every cluster shares a mean — a slice where all
+    queries score identically — and becomes more likely as retrieval improves.
+    Zero observed variance across clusters is not zero uncertainty about the
+    population; the percentile bootstrap cannot distinguish the two, so no
+    interval is reported.
     """
     groups = _grouped(values, clusters)
     if not groups:
         raise ValueError("cannot bootstrap an empty sample")
     mean = float(np.mean(values))
-    if len(groups) < _MIN_CLUSTERS_FOR_CI:
+    if len(groups) < MIN_CLUSTERS_FOR_CI:
         return mean, math.nan, math.nan
     sums = np.array([sum(group) for group in groups])
     sizes = np.array([len(group) for group in groups])
@@ -106,6 +117,8 @@ def clustered_bootstrap_ci(
     replicate_means = sums[picks].sum(axis=1) / sizes[picks].sum(axis=1)
     tail = (1.0 - _CONFIDENCE) / 2.0
     low, high = np.percentile(replicate_means, [tail * 100.0, (1.0 - tail) * 100.0])
+    if high - low < _DEGENERATE_CI_WIDTH:
+        return mean, math.nan, math.nan
     return mean, float(low), float(high)
 
 
