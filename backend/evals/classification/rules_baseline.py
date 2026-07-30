@@ -41,7 +41,9 @@ from taxonomy import ADJUDICATION_ESCAPES, AMBIGUOUS_TERMS, LEXICON, TYPES
 WEIGHT_FILENAME = 1.0
 WEIGHT_PARENT = 0.6
 WEIGHT_ANCESTOR = 0.35
-AMBIGUOUS_FACTOR = 0.5
+# Terms in AMBIGUOUS_TERMS raise every type they name. Held below
+# WEIGHT_ANCESTOR so a specific lexicon match at any depth outranks them.
+WEIGHT_AMBIGUOUS = 0.3
 THRESHOLDS = (0.0, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
 # Below this many gold examples a per-type rate is noise, not a measurement.
 MIN_PER_TYPE_FOR_RATE = 5
@@ -76,20 +78,26 @@ def score_rules(name: str, relpath: str, *, use_filename: bool, use_path: bool) 
         for term, candidates in AMBIGUOUS_TERMS.items():
             if term in haystack:
                 for candidate in candidates:
-                    scores[candidate] = max(scores[candidate], weight * AMBIGUOUS_FACTOR)
+                    scores[candidate] = max(scores[candidate], WEIGHT_AMBIGUOUS)
     return dict(scores)
 
 
 def predict_rules(
     name: str, relpath: str, *, use_filename: bool = True, use_path: bool = True
 ) -> tuple[str | None, float]:
-    """Top type and its confidence; ``None`` when nothing matched."""
+    """Top type and its confidence; ``None`` when nothing matched.
+
+    Confidence is the margin over the runner-up. Scores are a per-type maximum
+    rather than a sum, so confidence measures separation between candidates and
+    carries no information about absolute evidence strength.
+    """
     scores = score_rules(name, relpath, use_filename=use_filename, use_path=use_path)
     if not scores:
         return None, 0.0
-    total = sum(scores.values())
     ranked = sorted(scores.items(), key=lambda kv: -kv[1])
-    return ranked[0][0], ranked[0][1] / total
+    top_type, top = ranked[0]
+    runner_up = ranked[1][1] if len(ranked) > 1 else 0.0
+    return top_type, (top - runner_up) / top
 
 
 def coverage_table(rows: list[dict], **kwargs) -> list[tuple[float, int, float]]:
