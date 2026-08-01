@@ -87,11 +87,25 @@ class _LoadOptions:
     tmp_dir: Path
 
 
+@dataclass(frozen=True, slots=True)
+class _Selection:
+    """What the router chose, what it declined, and what sampling dropped."""
+
+    files: list[Path]
+    declined: dict[str, int]
+    chunkable_total: int
+
+    @property
+    def sampled(self) -> bool:
+        """True when ``--max-files`` held the run below the chunkable set."""
+        return len(self.files) < self.chunkable_total
+
+
 def _find_files(
     corpus_dir: Path,
     max_files: int,
     sample_seed: int | None,
-) -> tuple[list[Path], dict[str, int]]:
+) -> _Selection:
     """Chunkable files plus a census of what the router declined.
 
     Selection goes through the production strategy router rather than a
@@ -99,6 +113,10 @@ def _find_files(
     rather than what this script happens to recognise. Path order
     concentrates on one subtree; a seeded sample spans the whole archive,
     which is the representative test.
+
+    The declined census counts the whole directory even when ``max_files``
+    bounds the run, so the two figures are only comparable on a full run —
+    :attr:`_Selection.sampled` marks when they are not.
     """
     from unstash.documents.mime import detect_mime
     from unstash.documents.strategy import ParseStrategy, select_strategy
@@ -114,12 +132,13 @@ def _find_files(
         else:
             declined[strategy.value] = declined.get(strategy.value, 0) + 1
 
-    if sample_seed is None or len(chunkable) <= max_files:
-        return chunkable[:max_files], declined
+    total = len(chunkable)
+    if sample_seed is None or total <= max_files:
+        return _Selection(chunkable[:max_files], declined, total)
     import random
 
     rng = random.Random(sample_seed)
-    return sorted(rng.sample(chunkable, max_files)), declined
+    return _Selection(sorted(rng.sample(chunkable, max_files)), declined, total)
 
 
 def load_substitutions(path: Path | None) -> dict[str, str]:
@@ -370,8 +389,8 @@ async def run(args: argparse.Namespace) -> None:
     runnable, skipped_queries = load_queries(args.queries, substitutions)
     if not runnable:
         sys.exit("no runnable queries after substitution")
-    files, declined = _find_files(args.corpus_dir, args.max_files, args.sample_seed)
-    if not files:
+    selection = _find_files(args.corpus_dir, args.max_files, args.sample_seed)
+    if not selection.files:
         sys.exit(f"no chunkable files under {args.corpus_dir}")
 
     # The provider clients are built by the production factories from
@@ -381,7 +400,7 @@ async def run(args: argparse.Namespace) -> None:
     if "JINA_API_KEY" in os.environ:
         os.environ.setdefault("jina_api_key", os.environ["JINA_API_KEY"])
 
-    print(f"indexing {len(files)} files ...", flush=True)
+    print(f"indexing {len(selection.files)} files ...", flush=True)
     tmp_dir = Path(tempfile.mkdtemp(prefix="unstash-local-trace-"))
     opts = _LoadOptions(use_ocr=args.ocr, gotenberg_url=args.gotenberg_url, tmp_dir=tmp_dir)
     async with fresh_database() as pool:
@@ -396,7 +415,7 @@ async def run(args: argparse.Namespace) -> None:
         reranker = get_reranker(settings)
 
         org_id, paths, skipped_files = await index_corpus(
-            pool, files, args.corpus_dir, opts=opts, embedder=embedder
+            pool, selection.files, args.corpus_dir, opts=opts, embedder=embedder
         )
         chunks = await pool.fetchval("SELECT count(*) FROM chunks")
         print(
@@ -432,11 +451,21 @@ async def run(args: argparse.Namespace) -> None:
     ]
     # What was never indexed cannot be retrieved, and a reader coding a miss
     # needs to know whether the document was in the index at all.
-    unindexed = [f"{count} routed to {strategy}" for strategy, count in sorted(declined.items())]
+    if selection.sampled:
+        header += [
+            f"**Sampled run**: {len(selection.files)} of {selection.chunkable_total} chunkable "
+            f"documents (seed {args.sample_seed}). Most of the archive is absent, so a miss "
+            "here carries no information about retrieval quality.",
+            "",
+        ]
+    unindexed = [
+        f"{count} routed to {strategy}" for strategy, count in sorted(selection.declined.items())
+    ]
     if skipped_files:
         unindexed.append(f"{skipped_files} failed to parse, convert or OCR")
     if unindexed:
-        header += [f"Not indexed: {'; '.join(unindexed)}.", ""]
+        scope = "whole directory" if selection.sampled else "corpus"
+        header += [f"Not indexed ({scope}): {'; '.join(unindexed)}.", ""]
     if skipped_queries:
         header += [
             f"{len(skipped_queries)} queries skipped for unsubstituted placeholders:",
