@@ -17,7 +17,15 @@ these queries, and a number computed without them would be invented.
         --out /path/to/traces.md
     MISTRAL_API_KEY=... ...  --ocr        # OCR scanned PDFs via the production fallback
     ... --substitutions /path/to/subs.txt # fill <placeholder> slots in the queries
+    ... --gotenberg-url http://localhost:3000  # convert legacy office formats
     ... --max-files 400 --sample-seed 7   # bound and spread a large directory
+
+Which files are indexed is decided by the production strategy router, not by
+a suffix list here, so the traces reflect what the product can reach. Files
+the router sends to metadata-only or skip are counted in the report header:
+a reader coding a miss needs to know whether the document was in the index
+at all. Legacy office formats need the Gotenberg sidecar; without
+``--gotenberg-url`` they are counted alongside the rest.
 
 Queries are one per line; blank lines and ``#`` comments are ignored. A
 query still holding an unsubstituted ``<placeholder>`` is skipped and
@@ -42,8 +50,11 @@ import hashlib
 import mimetypes
 import os
 import re
+import shutil
 import sys
+import tempfile
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -54,10 +65,10 @@ sys.path.insert(0, str(BACKEND / "src"))
 import numpy as np
 from eval_db import fresh_database
 
-SUFFIXES = {".pdf", ".docx", ".md", ".txt"}
 # Mirrors the production ingestion defaults for the OCR fallback.
 OCR_MIN_CHARS_PER_PAGE = 200
 OCR_MAX_BYTES = 50 * 1024 * 1024
+CONVERT_MAX_BYTES = 50 * 1024 * 1024
 OCR_CACHE = Path.home() / ".cache" / "unstash-local-eval" / "ocr"
 # Per-chunk texts, offsets and embeddings — a different shape from the
 # pooled document vectors the clustering check caches, hence its own
@@ -67,19 +78,48 @@ PLACEHOLDER = re.compile(r"<[^<>]+>")
 EMBED_BATCH = 64
 
 
-def _find_files(corpus_dir: Path, max_files: int, sample_seed: int | None) -> list[Path]:
-    """Supported files, either path-ordered or a seeded random sample.
+@dataclass(frozen=True, slots=True)
+class _LoadOptions:
+    """Per-file handling knobs threaded through the ingest loop."""
 
-    Path order concentrates on one subtree; a seeded sample spans the whole
-    archive, which is the representative test.
+    use_ocr: bool
+    gotenberg_url: str | None
+    tmp_dir: Path
+
+
+def _find_files(
+    corpus_dir: Path,
+    max_files: int,
+    sample_seed: int | None,
+) -> tuple[list[Path], dict[str, int]]:
+    """Chunkable files plus a census of what the router declined.
+
+    Selection goes through the production strategy router rather than a
+    local suffix list, so the trace reflects what the product can index
+    rather than what this script happens to recognise. Path order
+    concentrates on one subtree; a seeded sample spans the whole archive,
+    which is the representative test.
     """
-    all_files = sorted(p for p in corpus_dir.rglob("*") if p.suffix.lower() in SUFFIXES)
-    if sample_seed is None or len(all_files) <= max_files:
-        return all_files[:max_files]
+    from unstash.documents.mime import detect_mime
+    from unstash.documents.strategy import ParseStrategy, select_strategy
+
+    chunkable: list[Path] = []
+    declined: dict[str, int] = {}
+    for path in sorted(corpus_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        strategy = select_strategy(detect_mime(path))
+        if strategy in (ParseStrategy.EXTRACT, ParseStrategy.CONVERT_THEN_EXTRACT):
+            chunkable.append(path)
+        else:
+            declined[strategy.value] = declined.get(strategy.value, 0) + 1
+
+    if sample_seed is None or len(chunkable) <= max_files:
+        return chunkable[:max_files], declined
     import random
 
     rng = random.Random(sample_seed)
-    return sorted(rng.sample(all_files, max_files))
+    return sorted(rng.sample(chunkable, max_files)), declined
 
 
 def load_substitutions(path: Path | None) -> dict[str, str]:
@@ -108,6 +148,21 @@ def load_queries(path: Path, substitutions: dict[str, str]) -> tuple[list[str], 
             query = query.replace(token, value)
         (skipped if PLACEHOLDER.search(query) else runnable).append(query)
     return runnable, skipped
+
+
+async def _converted_pdf(path: Path, gotenberg_url: str, tmp_dir: Path) -> Path:
+    """Legacy office file converted to a PDF beside the cache, never in the tree."""
+    from unstash.documents.conversion import convert_to_pdf
+
+    pdf = await convert_to_pdf(
+        path,
+        gotenberg_url=gotenberg_url,
+        max_bytes=CONVERT_MAX_BYTES,
+        timeout=180.0,
+    )
+    target = tmp_dir / f"{hashlib.sha256(str(path).encode()).hexdigest()}.pdf"
+    await asyncio.to_thread(target.write_bytes, pdf)
+    return target
 
 
 async def _parse_with_ocr(path: Path, use_ocr: bool):
@@ -154,7 +209,25 @@ async def _embed_all(texts: list[str], embedder) -> list[list[float]]:
     return vectors
 
 
-async def _load_document(path: Path, use_ocr: bool, embedder):
+async def _source_for_parse(path: Path, opts: _LoadOptions) -> Path | None:
+    """The file to hand the parser: the original, or its converted PDF."""
+    from unstash.documents.conversion import ConversionError
+    from unstash.documents.mime import detect_mime
+    from unstash.documents.strategy import ParseStrategy, select_strategy
+
+    if select_strategy(detect_mime(path)) is not ParseStrategy.CONVERT_THEN_EXTRACT:
+        return path
+    if opts.gotenberg_url is None:
+        print(f"  skipped (needs conversion, no sidecar): {path.name}", flush=True)
+        return None
+    try:
+        return await _converted_pdf(path, opts.gotenberg_url, opts.tmp_dir)
+    except ConversionError as exc:
+        print(f"  skipped (conversion failed: {exc}): {path.name}", flush=True)
+        return None
+
+
+async def _load_document(path: Path, opts: _LoadOptions, embedder):
     """Chunk rows and vectors for one file, via the content-keyed cache."""
     from unstash.documents.ocr import OcrError
 
@@ -170,8 +243,11 @@ async def _load_document(path: Path, use_ocr: bool, embedder):
             stored["tokens"].tolist(),
             stored["vectors"],
         )
+    source = await _source_for_parse(path, opts)
+    if source is None:
+        return None
     try:
-        chunks = await _parse_with_ocr(path, use_ocr)
+        chunks = await _parse_with_ocr(source, opts.use_ocr)
     except OcrError as exc:
         print(f"  skipped (OCR failed: {exc}): {path.name}", flush=True)
         return None
@@ -204,7 +280,7 @@ async def index_corpus(
     files: list[Path],
     corpus_dir: Path,
     *,
-    use_ocr: bool,
+    opts: _LoadOptions,
     embedder,
 ) -> tuple[uuid.UUID, dict[uuid.UUID, str], int]:
     """Insert an org and every parseable file.
@@ -219,7 +295,7 @@ async def index_corpus(
     paths: dict[uuid.UUID, str] = {}
     skipped = 0
     for position, path in enumerate(files, start=1):
-        loaded = await _load_document(path, use_ocr, embedder)
+        loaded = await _load_document(path, opts, embedder)
         if loaded is None:
             skipped += 1
             continue
@@ -294,9 +370,9 @@ async def run(args: argparse.Namespace) -> None:
     runnable, skipped_queries = load_queries(args.queries, substitutions)
     if not runnable:
         sys.exit("no runnable queries after substitution")
-    files = _find_files(args.corpus_dir, args.max_files, args.sample_seed)
+    files, declined = _find_files(args.corpus_dir, args.max_files, args.sample_seed)
     if not files:
-        sys.exit(f"no supported files under {args.corpus_dir}")
+        sys.exit(f"no chunkable files under {args.corpus_dir}")
 
     # The provider clients are built by the production factories from
     # Settings, so backend choice is expressed the way the app expresses it.
@@ -306,6 +382,8 @@ async def run(args: argparse.Namespace) -> None:
         os.environ.setdefault("jina_api_key", os.environ["JINA_API_KEY"])
 
     print(f"indexing {len(files)} files ...", flush=True)
+    tmp_dir = Path(tempfile.mkdtemp(prefix="unstash-local-trace-"))
+    opts = _LoadOptions(use_ocr=args.ocr, gotenberg_url=args.gotenberg_url, tmp_dir=tmp_dir)
     async with fresh_database() as pool:
         from unstash.config import get_settings
         from unstash.documents.embedder import get_embedder
@@ -318,7 +396,7 @@ async def run(args: argparse.Namespace) -> None:
         reranker = get_reranker(settings)
 
         org_id, paths, skipped_files = await index_corpus(
-            pool, files, args.corpus_dir, use_ocr=args.ocr, embedder=embedder
+            pool, files, args.corpus_dir, opts=opts, embedder=embedder
         )
         chunks = await pool.fetchval("SELECT count(*) FROM chunks")
         print(
@@ -340,6 +418,7 @@ async def run(args: argparse.Namespace) -> None:
             blocks.append(_trace_block(number, query, outcome, paths, args.top_k))
             if number % 10 == 0:
                 print(f"  {number}/{len(runnable)} queries ...", flush=True)
+    shutil.rmtree(tmp_dir, ignore_errors=True)
 
     header = [
         "# Retrieval traces for error analysis",
@@ -351,6 +430,13 @@ async def run(args: argparse.Namespace) -> None:
         "blank when the result set is adequate.",
         "",
     ]
+    # What was never indexed cannot be retrieved, and a reader coding a miss
+    # needs to know whether the document was in the index at all.
+    unindexed = [f"{count} routed to {strategy}" for strategy, count in sorted(declined.items())]
+    if skipped_files:
+        unindexed.append(f"{skipped_files} failed to parse, convert or OCR")
+    if unindexed:
+        header += [f"Not indexed: {'; '.join(unindexed)}.", ""]
     if skipped_queries:
         header += [
             f"{len(skipped_queries)} queries skipped for unsubstituted placeholders:",
@@ -373,6 +459,11 @@ def main() -> None:
     parser.add_argument("--embedder", choices=("jina", "fake"), default="jina")
     parser.add_argument("--reranker", choices=("jina", "fake"), default="jina")
     parser.add_argument("--ocr", action="store_true")
+    parser.add_argument(
+        "--gotenberg-url",
+        help="Sidecar base URL for legacy office conversion, e.g. http://localhost:3000. "
+        "Without it those files are counted and left unindexed.",
+    )
     parser.add_argument("--max-files", type=int, default=10_000)
     parser.add_argument("--sample-seed", type=int)
     parser.add_argument("--top-k", type=int, default=10)
