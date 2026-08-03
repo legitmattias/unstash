@@ -275,10 +275,9 @@ async def _source_for_parse(path: Path, opts: _LoadOptions) -> Path | None:
         return None
 
 
-async def _load_document(path: Path, opts: _LoadOptions, embedder):
+async def _load_document(path: Path, digest: str, opts: _LoadOptions, embedder):
     """Chunk rows and vectors for one file, via the content-keyed cache."""
     CHUNK_CACHE.mkdir(parents=True, exist_ok=True)
-    digest = hashlib.sha256(await asyncio.to_thread(path.read_bytes)).hexdigest()
     cached = CHUNK_CACHE / f"{digest}.npz"
     if cached.exists():
         stored = np.load(cached, allow_pickle=True)
@@ -338,25 +337,35 @@ async def index_corpus(
     *,
     opts: _LoadOptions,
     embedder,
-) -> tuple[uuid.UUID, dict[uuid.UUID, str], int]:
-    """Insert an org and every parseable file.
+) -> tuple[uuid.UUID, dict[uuid.UUID, list[str]], int]:
+    """Insert an org and every parseable file, deduplicated by content.
 
-    Returns the org id, a document-to-relative-path map (the search hit
-    carries no path, and the folder is load-bearing evidence when reading a
-    trace), and the number of files skipped.
+    Identical bytes filed in two folders become one document, as in the
+    upload path, which keys ``content_hash`` on content and returns the
+    existing row. Indexing each copy separately would put the same document
+    in a result list several times and read as a ranking fault.
+
+    Returns the org id, a document-to-paths map (the search hit carries no
+    path, and the folder is load-bearing evidence when reading a trace), and
+    the number of files skipped.
     """
     org_id = await pool.fetchval(
         "INSERT INTO organisations (slug, name) VALUES ('local', 'Local Corpus') RETURNING id"
     )
-    paths: dict[uuid.UUID, str] = {}
+    paths: dict[uuid.UUID, list[str]] = {}
+    by_digest: dict[str, uuid.UUID] = {}
     skipped = 0
     for position, path in enumerate(files, start=1):
-        loaded = await _load_document(path, opts, embedder)
+        relpath = str(path.relative_to(corpus_dir))
+        digest = hashlib.sha256(await asyncio.to_thread(path.read_bytes)).hexdigest()
+        if digest in by_digest:
+            paths[by_digest[digest]].append(relpath)
+            continue
+        loaded = await _load_document(path, digest, opts, embedder)
         if loaded is None:
             skipped += 1
             continue
         texts, starts, ends, tokens, vectors = loaded
-        relpath = str(path.relative_to(corpus_dir))
         mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         document_id = await pool.fetchval(
             "INSERT INTO documents (org_id, title, source_uri, mime_type, size_bytes,"
@@ -366,9 +375,10 @@ async def index_corpus(
             relpath,
             mime,
             path.stat().st_size,
-            hashlib.sha256(relpath.encode()).hexdigest(),
+            digest,
         )
-        paths[document_id] = relpath
+        by_digest[digest] = document_id
+        paths[document_id] = [relpath]
         for index, text in enumerate(texts):
             await pool.execute(
                 "INSERT INTO chunks (org_id, document_id, chunk_index, text, token_count,"
@@ -392,7 +402,7 @@ def _trace_block(
     number: int,
     query: str,
     outcome,
-    paths: dict[uuid.UUID, str],
+    paths: dict[uuid.UUID, list[str]],
     top_k: int,
 ) -> str:
     """One query's trace, with a blank coding line for the reader to fill in."""
@@ -409,9 +419,13 @@ def _trace_block(
         # Snippets span chunk line breaks; a newline would end the blockquote
         # and render the remainder as body text or a list.
         snippet = " ".join(hit.snippet.split())
+        filings = paths.get(hit.document_id, ["?"])
+        where = f"`{filings[0]}`"
+        if len(filings) > 1:
+            where += f" (+{len(filings) - 1} more filing(s) of the same content)"
         lines += [
             f"**{rank}. {hit.title}** · `{hit.mime_type}` · fused {hit.score:.4f} · rerank {rerank}",
-            f"  `{paths.get(hit.document_id, '?')}`",
+            f"  {where}",
             f"  > {snippet}",
             "",
         ]
