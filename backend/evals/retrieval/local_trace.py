@@ -76,6 +76,9 @@ OCR_CACHE = Path.home() / ".cache" / "unstash-local-eval" / "ocr"
 CHUNK_CACHE = Path.home() / ".cache" / "unstash-local-eval" / "chunks"
 PLACEHOLDER = re.compile(r"<[^<>]+>")
 EMBED_BATCH = 64
+# Backoff before each retry of a document's embedding call; one final attempt
+# follows the last delay.
+EMBED_RETRY_DELAYS = (5, 20, 60)
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +231,32 @@ async def _embed_all(texts: list[str], embedder) -> list[list[float]]:
     return vectors
 
 
+async def _embed_with_retry(texts: list[str], embedder, path: Path) -> list[list[float]] | None:
+    """Embed one document's chunks, retrying transient provider failures.
+
+    A sweep of this size issues hundreds of provider calls over hours, so a
+    rate limit or a 5xx is expected rather than exceptional. Dropping the
+    document on the first error would thin the corpus for a reason that has
+    nothing to do with the document.
+    """
+    for attempt, delay in enumerate(EMBED_RETRY_DELAYS, start=1):
+        try:
+            return await _embed_all(texts, embedder)
+        except Exception as exc:
+            last = f"{type(exc).__name__}: {exc}"
+            print(
+                f"  embed attempt {attempt}/{len(EMBED_RETRY_DELAYS)} failed ({last}), "
+                f"retrying in {delay}s: {path.name}",
+                flush=True,
+            )
+            await asyncio.sleep(delay)
+    try:
+        return await _embed_all(texts, embedder)
+    except Exception as exc:
+        print(f"  skipped (embed failed: {type(exc).__name__}): {path.name}", flush=True)
+        return None
+
+
 async def _source_for_parse(path: Path, opts: _LoadOptions) -> Path | None:
     """The file to hand the parser: the original, or its converted PDF."""
     from unstash.documents.conversion import ConversionError
@@ -248,8 +277,6 @@ async def _source_for_parse(path: Path, opts: _LoadOptions) -> Path | None:
 
 async def _load_document(path: Path, opts: _LoadOptions, embedder):
     """Chunk rows and vectors for one file, via the content-keyed cache."""
-    from unstash.documents.ocr import OcrError
-
     CHUNK_CACHE.mkdir(parents=True, exist_ok=True)
     digest = hashlib.sha256(await asyncio.to_thread(path.read_bytes)).hexdigest()
     cached = CHUNK_CACHE / f"{digest}.npz"
@@ -262,6 +289,13 @@ async def _load_document(path: Path, opts: _LoadOptions, embedder):
             stored["tokens"].tolist(),
             stored["vectors"],
         )
+    return await _parse_and_embed(path, cached, opts, embedder)
+
+
+async def _parse_and_embed(path: Path, cached: Path, opts: _LoadOptions, embedder):
+    """Parse, embed and cache one uncached file; ``None`` when it cannot be read."""
+    from unstash.documents.ocr import OcrError
+
     source = await _source_for_parse(path, opts)
     if source is None:
         return None
@@ -279,7 +313,10 @@ async def _load_document(path: Path, opts: _LoadOptions, embedder):
         return None
 
     texts = [c.text for c in chunks]
-    vectors = np.asarray(await _embed_all(texts, embedder), dtype=np.float32)
+    embedded = await _embed_with_retry(texts, embedder, path)
+    if embedded is None:
+        return None
+    vectors = np.asarray(embedded, dtype=np.float32)
     starts = [c.char_offset_start for c in chunks]
     ends = [c.char_offset_end for c in chunks]
     tokens = [c.token_count for c in chunks]
@@ -384,6 +421,15 @@ def _trace_block(
     return "\n".join(lines)
 
 
+def _error_block(number: int, query: str, detail: str) -> str:
+    """A placeholder block for a query the pipeline could not answer at all.
+
+    A failed call is not a retrieval result and must not be coded as one, so
+    the block carries no coding line.
+    """
+    return "\n".join([f"## {number}. {query}", "", f"**Query failed:** {detail}", "", "---", ""])
+
+
 async def run(args: argparse.Namespace) -> None:
     substitutions = load_substitutions(args.substitutions)
     runnable, skipped_queries = load_queries(args.queries, substitutions)
@@ -425,24 +471,52 @@ async def run(args: argparse.Namespace) -> None:
 
         blocks = []
         for number, query in enumerate(runnable, start=1):
-            async with org_context(org_id) as session:
-                outcome = await run_search(
-                    session,
-                    org_id=org_id,
-                    query=query,
-                    embedder=embedder,
-                    reranker=reranker,
-                    settings=settings,
-                )
+            # Hours of indexing precede this loop and the report is written
+            # after it, so one failed query must not discard the rest.
+            try:
+                async with org_context(org_id) as session:
+                    outcome = await run_search(
+                        session,
+                        org_id=org_id,
+                        query=query,
+                        embedder=embedder,
+                        reranker=reranker,
+                        settings=settings,
+                    )
+            except Exception as exc:
+                blocks.append(_error_block(number, query, f"{type(exc).__name__}: {exc}"))
+                print(f"  query {number} failed ({type(exc).__name__})", flush=True)
+                continue
             blocks.append(_trace_block(number, query, outcome, paths, args.top_k))
             if number % 10 == 0:
                 print(f"  {number}/{len(runnable)} queries ...", flush=True)
     shutil.rmtree(tmp_dir, ignore_errors=True)
+    _write_report(
+        args, selection, blocks, skipped_queries, _Counts(len(paths), chunks, skipped_files)
+    )
 
+
+@dataclass(frozen=True, slots=True)
+class _Counts:
+    """What the indexing pass produced, for the report header."""
+
+    documents: int
+    chunks: int
+    skipped_files: int
+
+
+def _write_report(
+    args: argparse.Namespace,
+    selection: _Selection,
+    blocks: list[str],
+    skipped_queries: list[str],
+    counts: _Counts,
+) -> None:
+    """Write the trace file, headed by everything needed to read it honestly."""
     header = [
         "# Retrieval traces for error analysis",
         "",
-        f"{len(paths)} documents ({chunks} chunks) · {len(runnable)} queries "
+        f"{counts.documents} documents ({counts.chunks} chunks) · {len(blocks)} queries "
         f"· embedder={args.embedder} · reranker={args.reranker} · ocr={args.ocr}",
         "",
         "Fill `first_failure:` with the **first upstream** failure only. Leave it "
@@ -461,14 +535,14 @@ async def run(args: argparse.Namespace) -> None:
     unindexed = [
         f"{count} routed to {strategy}" for strategy, count in sorted(selection.declined.items())
     ]
-    if skipped_files:
-        unindexed.append(f"{skipped_files} failed to parse, convert or OCR")
+    if counts.skipped_files:
+        unindexed.append(f"{counts.skipped_files} failed to parse, convert, OCR or embed")
     if unindexed:
         scope = "whole directory" if selection.sampled else "corpus"
         header += [f"Not indexed ({scope}): {'; '.join(unindexed)}.", ""]
     if skipped_queries:
         header += [
-            f"{len(skipped_queries)} queries skipped for unsubstituted placeholders:",
+            f"{len(skipped_queries)} queries skipped for unfilled placeholders:",
             "",
             *(f"- {q}" for q in skipped_queries),
             "",
