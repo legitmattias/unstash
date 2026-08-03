@@ -53,7 +53,9 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 import uuid
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -79,6 +81,13 @@ EMBED_BATCH = 64
 # Backoff before each retry of a document's embedding call; one final attempt
 # follows the last delay.
 EMBED_RETRY_DELAYS = (5, 20, 60)
+OCR_RETRY_DELAYS = (5, 20, 60)
+# OcrError messages that describe a settled outcome rather than a transient one.
+OCR_TERMINAL_MARKERS = (
+    "produced no text",
+    "over the",
+    "Could not read source file",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +97,7 @@ class _LoadOptions:
     use_ocr: bool
     gotenberg_url: str | None
     tmp_dir: Path
+    budget: _TokenBudget
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,9 +197,58 @@ async def _converted_pdf(path: Path, gotenberg_url: str, tmp_dir: Path) -> Path:
     return target
 
 
+def _ocr_can_retry(message: str) -> bool:
+    """Whether re-asking could plausibly give a different answer.
+
+    ``OcrError`` carries every failure mode as one type, so the message is
+    the only signal available. A document with no text layer, one over the
+    size limit and one that cannot be read all fail identically on a second
+    attempt; a 4xx other than 429 is likewise a settled answer.
+    """
+    if any(marker in message for marker in OCR_TERMINAL_MARKERS):
+        return False
+    status = re.search(r"OCR API returned (\d{3})", message)
+    if status and not status.group(1).startswith("5"):
+        return status.group(1) == "429"
+    return True
+
+
+async def _ocr_once(path: Path) -> str:
+    """One OCR call against the production client."""
+    from unstash.documents.ocr import ocr_pdf_to_markdown
+
+    return await ocr_pdf_to_markdown(
+        path,
+        api_key=os.environ["MISTRAL_API_KEY"],
+        base_url="https://api.mistral.ai",
+        model="mistral-ocr-latest",
+        max_bytes=OCR_MAX_BYTES,
+        timeout=120.0,
+    )
+
+
+async def _ocr_with_retry(path: Path) -> str:
+    """OCR one PDF, retrying provider-side failures; raises when out of attempts."""
+    from unstash.documents.ocr import OcrError
+
+    for attempt, delay in enumerate(OCR_RETRY_DELAYS, start=1):
+        try:
+            return await _ocr_once(path)
+        except OcrError as exc:
+            if not _ocr_can_retry(str(exc)):
+                raise
+            print(
+                f"  OCR attempt {attempt}/{len(OCR_RETRY_DELAYS)} failed ({exc}), "
+                f"retrying in {delay}s: {path.name}",
+                flush=True,
+            )
+            await asyncio.sleep(delay)
+    return await _ocr_once(path)
+
+
 async def _parse_with_ocr(path: Path, use_ocr: bool):
     """Parsed chunks for one file; OCR fallback for scanned PDFs when enabled."""
-    from unstash.documents.ocr import needs_ocr, ocr_pdf_to_markdown
+    from unstash.documents.ocr import needs_ocr
     from unstash.documents.parser import parse_to_chunks
 
     parsed = await asyncio.to_thread(parse_to_chunks, path)
@@ -207,41 +266,80 @@ async def _parse_with_ocr(path: Path, use_ocr: bool):
     digest = hashlib.sha256(await asyncio.to_thread(path.read_bytes)).hexdigest()
     cached = OCR_CACHE / f"{digest}.md"
     if not cached.exists():
-        markdown = await ocr_pdf_to_markdown(
-            path,
-            api_key=os.environ["MISTRAL_API_KEY"],
-            base_url="https://api.mistral.ai",
-            model="mistral-ocr-latest",
-            max_bytes=OCR_MAX_BYTES,
-            timeout=120.0,
-        )
+        markdown = await _ocr_with_retry(path)
         await asyncio.to_thread(cached.write_text, markdown, "utf-8")
     ocr_parsed = await asyncio.to_thread(parse_to_chunks, cached)
     return ocr_parsed.chunks or None
 
 
-async def _embed_all(texts: list[str], embedder) -> list[list[float]]:
-    """Embed in bounded batches; a long parse can exceed the provider's limit."""
+class _TokenBudget:
+    """Sliding-window limiter over the provider's tokens-per-minute cap.
+
+    The corpus is mostly small documents — a median of ~900 tokens — with a
+    tail of spreadsheets and long reports that chunk into hundreds of pieces.
+    One of those issues several large requests back to back and can exceed a
+    whole minute's allowance on its own, which is what provokes the limit;
+    average throughput sits far below it. Waiting before the request keeps
+    the tail from bursting, where retrying after a rejection does not.
+    """
+
+    def __init__(self, tokens_per_minute: int) -> None:
+        self._cap = tokens_per_minute
+        self._window: deque[tuple[float, int]] = deque()
+
+    def _spent(self, now: float) -> int:
+        while self._window and now - self._window[0][0] >= 60.0:
+            self._window.popleft()
+        return sum(tokens for _, tokens in self._window)
+
+    async def take(self, tokens: int) -> None:
+        """Block until ``tokens`` fit in the trailing minute, then record them."""
+        while True:
+            now = time.monotonic()
+            spent = self._spent(now)
+            # A single request larger than the cap can never fit; let it
+            # through on an empty window rather than deadlock.
+            if spent + tokens <= self._cap or not self._window:
+                self._window.append((now, tokens))
+                return
+            wait = 60.0 - (now - self._window[0][0])
+            await asyncio.sleep(max(wait, 0.1))
+
+
+async def _embed_all(
+    texts: list[str],
+    token_counts: list[int],
+    embedder,
+    budget: _TokenBudget,
+) -> list[list[float]]:
+    """Embed in bounded batches, pacing against the provider's token budget."""
     from unstash.documents.embedder import EmbeddingTask
 
     vectors: list[list[float]] = []
     for start in range(0, len(texts), EMBED_BATCH):
-        batch = await embedder.embed(texts[start : start + EMBED_BATCH], task=EmbeddingTask.PASSAGE)
+        window = slice(start, start + EMBED_BATCH)
+        await budget.take(sum(token_counts[window]))
+        batch = await embedder.embed(texts[window], task=EmbeddingTask.PASSAGE)
         vectors.extend(batch.vectors)
     return vectors
 
 
-async def _embed_with_retry(texts: list[str], embedder, path: Path) -> list[list[float]] | None:
+async def _embed_with_retry(
+    texts: list[str],
+    token_counts: list[int],
+    embedder,
+    budget: _TokenBudget,
+    path: Path,
+) -> list[list[float]] | None:
     """Embed one document's chunks, retrying transient provider failures.
 
-    A sweep of this size issues hundreds of provider calls over hours, so a
-    rate limit or a 5xx is expected rather than exceptional. Dropping the
-    document on the first error would thin the corpus for a reason that has
-    nothing to do with the document.
+    Pacing is the primary defence; this is the backstop for what pacing
+    cannot predict — a 5xx, a dropped connection, or another client sharing
+    the key's allowance.
     """
     for attempt, delay in enumerate(EMBED_RETRY_DELAYS, start=1):
         try:
-            return await _embed_all(texts, embedder)
+            return await _embed_all(texts, token_counts, embedder, budget)
         except Exception as exc:
             last = f"{type(exc).__name__}: {exc}"
             print(
@@ -251,7 +349,7 @@ async def _embed_with_retry(texts: list[str], embedder, path: Path) -> list[list
             )
             await asyncio.sleep(delay)
     try:
-        return await _embed_all(texts, embedder)
+        return await _embed_all(texts, token_counts, embedder, budget)
     except Exception as exc:
         print(f"  skipped (embed failed: {type(exc).__name__}): {path.name}", flush=True)
         return None
@@ -312,13 +410,13 @@ async def _parse_and_embed(path: Path, cached: Path, opts: _LoadOptions, embedde
         return None
 
     texts = [c.text for c in chunks]
-    embedded = await _embed_with_retry(texts, embedder, path)
+    tokens = [c.token_count for c in chunks]
+    embedded = await _embed_with_retry(texts, tokens, embedder, opts.budget, path)
     if embedded is None:
         return None
     vectors = np.asarray(embedded, dtype=np.float32)
     starts = [c.char_offset_start for c in chunks]
     ends = [c.char_offset_end for c in chunks]
-    tokens = [c.token_count for c in chunks]
     np.savez(
         cached,
         texts=np.array(texts, dtype=object),
@@ -462,7 +560,12 @@ async def run(args: argparse.Namespace) -> None:
 
     print(f"indexing {len(selection.files)} files ...", flush=True)
     tmp_dir = Path(tempfile.mkdtemp(prefix="unstash-local-trace-"))
-    opts = _LoadOptions(use_ocr=args.ocr, gotenberg_url=args.gotenberg_url, tmp_dir=tmp_dir)
+    opts = _LoadOptions(
+        use_ocr=args.ocr,
+        gotenberg_url=args.gotenberg_url,
+        tmp_dir=tmp_dir,
+        budget=_TokenBudget(args.tpm),
+    )
     async with fresh_database() as pool:
         from unstash.config import get_settings
         from unstash.documents.embedder import get_embedder
@@ -580,6 +683,13 @@ def main() -> None:
         "--gotenberg-url",
         help="Sidecar base URL for legacy office conversion, e.g. http://localhost:3000. "
         "Without it those files are counted and left unindexed.",
+    )
+    parser.add_argument(
+        "--tpm",
+        type=int,
+        default=80_000,
+        help="Embedding tokens per minute to pace to. Default leaves headroom under "
+        "the 100k free-tier cap; raise it for a paid key.",
     )
     parser.add_argument("--max-files", type=int, default=10_000)
     parser.add_argument("--sample-seed", type=int)
