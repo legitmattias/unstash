@@ -13,6 +13,10 @@ intervals and a paired permutation test (`metrics.py`).
   run-to-run spread and writes the baseline.
 - `corpus/`, `golden.jsonl`, `world_bible.md` — the synthetic documents, graded
   queries, and the fictional BRF they describe.
+- `local_trace.py` — not part of this harness's measurement. Indexes an
+  operator-provided directory and dumps one search trace per query for hand-read
+  error analysis. It reports **no metrics**: those queries carry no relevance
+  judgments, so any score computed over them would be invented.
 
 ## Golden set version: **v1** (46 documents, 44 queries)
 
