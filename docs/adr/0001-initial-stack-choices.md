@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. (Frontend section superseded by ADR 0007.)
+Accepted. (Frontend section superseded by ADR 0007. Embeddings data-residency claim corrected 2026-08-03 — see the amendment at the end.)
 
 ## Context
 
@@ -59,7 +59,7 @@ We adopt the following stack:
 - **python-magic** (libmagic) for content-based MIME type detection
 
 ### Embeddings and Machine Learning
-- **Jina AI v4** (EU-hosted in Germany, multilingual, open weights) for embeddings
+- **Jina AI v4** (multilingual, strong on Swedish) for embeddings — the residency and licensing characteristics stated when this ADR was written no longer hold; see the amendment at the end
 - **BERTopic** (UMAP + HDBSCAN + c-TF-IDF) for adaptive document type discovery
 - **scikit-learn** for classical clustering, classification, and TF-IDF
 - **Calibrated Logistic Regression** on Jina embeddings + TF-IDF features for ongoing document classification (with proper probability scores for confidence-based LLM fallback)
@@ -150,3 +150,37 @@ This decision should be revisited if:
 - The project's scope shifts substantially
 
 Review cadence: informal review at the end of each implementation phase, formal review at the 12-month mark.
+
+## Amendment 2026-08-03: embeddings data residency and model licensing
+
+This ADR selected the embeddings provider partly on the basis that it was
+EU-hosted in Germany with open weights, and elsewhere the project treats
+EU processing as a product property rather than an implementation detail.
+Verification against current vendor documentation shows that basis no longer
+holds for the embeddings and reranking path.
+
+- The provider's data-residency option covers its Reader and Search APIs.
+  **The Embeddings and Reranker APIs have no regional endpoint and no
+  documented residency option** — those are the two this system calls.
+- The vendor was **acquired on 2025-10-07**. Its published terms now carry a
+  notice that they may no longer reflect current processing practice, and point
+  to the acquirer's customer DPA as the governing agreement. Any residency
+  assessment must be made against that agreement.
+- The terms do state that customer inputs are not used to train models, and that
+  input and output are retained only as needed to serve a request. This is a
+  meaningful protection and a separate question from where processing occurs.
+- The published weights carry the **Qwen Research License**, inherited from the
+  base model; the model card records an earlier non-commercial label as an error.
+  Whether that licence permits commercial use is unresolved, so self-hosting
+  cannot yet be counted as the fallback this ADR assumed.
+
+The abstraction this ADR chose — the embedder behind an interface — still holds
+and is what keeps this correctable. One assumption made alongside it does not:
+migrating providers requires **re-embedding the corpus**, because different
+models produce different vectors. Provider portability is an interface property,
+not an index property.
+
+No change to the selected component is made here. The decision to record is that
+the stack must not be described as EU-hosted without excepting embeddings and
+reranking, and that the question is resolved **before production**, not before
+the pilot. Tracked as an open issue.
