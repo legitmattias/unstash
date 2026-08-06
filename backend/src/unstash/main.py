@@ -33,6 +33,7 @@ from unstash.orgs import orgs_router
 from unstash.ratelimit import client_ip, within_fixed_window
 from unstash.search.router import search_router
 from unstash.startup_checks import (
+    check_embedding_dimensions,
     check_not_superuser,
     check_required_extensions,
     check_schema_at_head,
@@ -77,6 +78,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     )
 
     check_secrets_loadable(settings)
+    check_embedding_dimensions(settings)
 
     engine = get_engine()
     async with engine.begin() as conn:

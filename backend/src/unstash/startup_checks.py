@@ -52,6 +52,32 @@ REQUIRED_EXTENSIONS: tuple[str, ...] = (
 )
 
 
+def check_embedding_dimensions(settings: Settings) -> None:
+    """Confirm the configured embedding width matches the vector column.
+
+    ``chunks.embedding`` is a fixed-width ``vector`` column, so a provider or
+    model whose output width differs from ``EMBEDDING_DIM`` is rejected by
+    Postgres on insert — mid-ingest, per chunk, after the parse and the paid
+    embedding call have already happened. The two values are coupled and live
+    in different files, so the mismatch is checked here rather than left to
+    surface as a write failure.
+    """
+    # Imported here rather than at module scope: the model module imports the
+    # SQLAlchemy registry, and startup checks are also called from contexts
+    # that do not otherwise need it.
+    from unstash.db.models.chunk import EMBEDDING_DIM  # noqa: PLC0415
+
+    if settings.jina_embedding_dimensions != EMBEDDING_DIM:
+        msg = (
+            f"Embedding width mismatch: jina_embedding_dimensions="
+            f"{settings.jina_embedding_dimensions} but chunks.embedding is "
+            f"{EMBEDDING_DIM}-dimensional. Changing the embedding width needs a "
+            f"migration altering the column and a re-embed of every chunk — the "
+            f"stored vectors are not portable across widths."
+        )
+        raise StartupCheckError(msg)
+
+
 def check_secrets_loadable(settings: Settings) -> None:
     """Confirm every required secret has been loaded with a non-empty value.
 
