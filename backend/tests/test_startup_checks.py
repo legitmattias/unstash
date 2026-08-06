@@ -10,10 +10,12 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 
 from unstash.config import Settings
+from unstash.db.models.chunk import EMBEDDING_DIM
 from unstash.startup_checks import (
     REQUIRED_EXTENSIONS,
     REQUIRED_SECRETS,
     StartupCheckError,
+    check_embedding_dimensions,
     check_not_superuser,
     check_required_extensions,
     check_schema_at_head,
@@ -207,3 +209,29 @@ async def test_check_schema_at_head_raises_when_ini_missing(
 
     assert "alembic.ini not found" in str(exc_info.value)
     conn.execute.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# check_embedding_dimensions
+# ---------------------------------------------------------------------------
+
+
+def test_check_embedding_dimensions_passes_when_matching() -> None:
+    settings = Settings(
+        **{name: f"value-for-{name}" for name in REQUIRED_SECRETS},
+        jina_embedding_dimensions=EMBEDDING_DIM,
+    )
+    check_embedding_dimensions(settings)
+
+
+def test_check_embedding_dimensions_rejects_mismatch() -> None:
+    """A provider whose width differs from the column must fail at boot."""
+    settings = Settings(
+        **{name: f"value-for-{name}" for name in REQUIRED_SECRETS},
+        jina_embedding_dimensions=EMBEDDING_DIM // 2,
+    )
+    with pytest.raises(StartupCheckError) as excinfo:
+        check_embedding_dimensions(settings)
+    message = str(excinfo.value)
+    assert str(EMBEDDING_DIM) in message
+    assert str(EMBEDDING_DIM // 2) in message
