@@ -81,6 +81,11 @@ EMBED_BATCH = 64
 # Backoff before each retry of a document's embedding call; one final attempt
 # follows the last delay.
 EMBED_RETRY_DELAYS = (5, 20, 60)
+# Measured over 800 documents of this corpus (5.75M chars / 2.33M tokens from
+# the chunker's own tokenizer). Swedish compounds fragment heavily, so the
+# common four-characters-per-token assumption understates rerank payloads by
+# ~40% — enough to blow a token budget that looks comfortable on paper.
+CHARS_PER_TOKEN = 2.46
 OCR_RETRY_DELAYS = (5, 20, 60)
 # OcrError messages that describe a settled outcome rather than a transient one.
 OCR_TERMINAL_MARKERS = (
@@ -304,6 +309,32 @@ class _TokenBudget:
                 return
             wait = 60.0 - (now - self._window[0][0])
             await asyncio.sleep(max(wait, 0.1))
+
+
+class _PacedReranker:
+    """Reranker wrapper that draws from the same provider token budget.
+
+    Rerank shares the embedding key's allowance and is the heavier of the two
+    per call: one request carries the query plus every candidate excerpt. Left
+    unpaced against a swept query list it exhausts the minute's tokens quickly,
+    and the failure is quiet — a rerank error is non-fatal by design, so the
+    request degrades to fusion order and the trace still looks complete.
+
+    Token count is estimated from character length, since the provider is
+    handed raw strings here. ``CHARS_PER_TOKEN`` is measured on this corpus
+    rather than assumed: Swedish compounds fragment far more than the usual
+    four-characters-per-token rule of thumb.
+    """
+
+    def __init__(self, inner, budget: _TokenBudget) -> None:
+        self._inner = inner
+        self._budget = budget
+
+    async def rerank(self, query: str, documents: list[str]):
+        """Wait for budget, then delegate to the wrapped reranker."""
+        chars = len(query) + sum(len(d) for d in documents)
+        await self._budget.take(int(chars / CHARS_PER_TOKEN) + 1)
+        return await self._inner.rerank(query, documents)
 
 
 async def _embed_all(
@@ -575,7 +606,7 @@ async def run(args: argparse.Namespace) -> None:
 
         settings = get_settings()
         embedder = get_embedder(settings)
-        reranker = get_reranker(settings)
+        reranker = _PacedReranker(get_reranker(settings), opts.budget)
 
         org_id, paths, skipped_files = await index_corpus(
             pool, selection.files, args.corpus_dir, opts=opts, embedder=embedder
