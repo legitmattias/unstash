@@ -60,6 +60,15 @@
     word-break: break-all; margin: .2rem 0 .3rem 2.1rem;
   }
   .hit .snip { margin-left: 2.1rem; color: var(--ink); font-size: .9rem; }
+  .hit .pathrow { display: flex; gap: .4rem; align-items: baseline; margin: .2rem 0 .3rem 2.1rem; }
+  .hit .pathrow .path { margin: 0; flex: 1 1 auto; }
+  .act {
+    font: inherit; font-size: .7rem; padding: .05rem .4rem; border: 1px solid var(--line);
+    border-radius: 4px; background: var(--bg); color: var(--muted);
+    cursor: pointer; text-decoration: none; white-space: nowrap; flex: 0 0 auto;
+  }
+  .act:hover { border-color: var(--accent); color: var(--accent); }
+  .act.done { color: var(--good); border-color: var(--good); }
   .empty { color: var(--warn); font-style: italic; padding: .6rem 0; }
   .code {
     position: fixed; bottom: 0; left: 0; right: 0; background: var(--panel);
@@ -110,6 +119,7 @@
     <span>since new <b id="sincenew">0</b></span>
     <span>coded <b id="coded">0</b></span>
   </span>
+  <button id="lookup-btn">Corpus /</button>
   <button id="help-btn">?</button>
   <button id="export-btn">Export</button>
 </header>
@@ -123,7 +133,7 @@
 <div class="code">
   <div class="inner">
     <div class="note">
-      <label for="note">First thing that went wrong — your words, no categories. Blank = fine.</label>
+      <label for="note">What is wrong with these results? Your words, no categories. Blank = they are fine.</label>
       <input type="text" id="note" list="notes" autocomplete="off" spellcheck="false">
       <datalist id="notes"></datalist>
     </div>
@@ -136,6 +146,7 @@
         <option value="not-retrieved">in index, not retrieved</option>
         <option value="ranked-low">retrieved, ranked low</option>
         <option value="nothing-to-find">nothing to find</option>
+        <option value="unsure">unsure without checking</option>
         <option value="wrong-snippet">right doc, wrong passage</option>
       </select>
     </div>
@@ -144,27 +155,52 @@
       <button id="next-btn">Next →</button>
     </div>
     <div class="hint" style="flex:1 1 100%">
+      <kbd>1</kbd>–<kbd>9</kbd> mark relevant · <kbd>f</kbd> write a note ·
       <kbd>Enter</kbd> save and next · <kbd>←</kbd><kbd>→</kbd> move ·
-      <kbd>1</kbd>–<kbd>9</kbd> mark result relevant · <kbd>?</kbd> help.
-      Record only the <em>first</em> failure — later ones are consequences of it.
+      <kbd>/</kbd> does it exist · <kbd>?</kbd> help.
+      Describe the <em>symptom</em>; the cause comes later.
     </div>
   </div>
 </div>
 
+<dialog id="lookup">
+  <h2>Does it exist?</h2>
+  <p>Search every file the indexer would have read, by name or folder. This is how
+     you tell <em>“retrieval missed it”</em> from <em>“there is nothing to find”</em> —
+     which look identical in the result list and need opposite fixes.</p>
+  <input type="text" id="lookup-q" placeholder="besiktning, 1974, ritning…" autocomplete="off">
+  <div class="hint" id="lookup-count"></div>
+  <div id="lookup-results" style="max-height:22rem;overflow:auto;margin-top:.5rem"></div>
+  <form method="dialog" style="margin-top:.8rem"><button>Close</button></form>
+</dialog>
+
 <dialog id="help">
   <h2>How to use this</h2>
-  <p>Read the results, then write in your own words what first went wrong. Do not
-     try to fit a category — the categories come afterwards, from what you wrote.</p>
-  <p>If the result set is fine, leave the note blank and move on. Only the first
-     failure goes in: if the right document was never indexed, that is the note,
-     not the fact that ranking and snippet are also wrong.</p>
+  <p>Read the results and write, in your own words, what is wrong with them. Do
+     not try to fit a category — the categories come afterwards, from what you
+     wrote. If the set is fine, leave it blank.</p>
+  <p><strong>Describe what you can see.</strong> “Nothing here is about the
+     question”, “right topic but the wrong year”, “correct document at rank 8”,
+     “the snippet is from the wrong part”. You are recording a symptom, not
+     diagnosing a cause.</p>
+  <p><strong>When the cause matters, check.</strong> Press <kbd>/</kbd> to search
+     the indexed file list. If documents that should have matched are sitting
+     there unretrieved, that is a retrieval failure. If nothing relevant exists,
+     an empty-looking result set is correct behaviour and not a fault. Those two
+     are indistinguishable from the results alone, which is why the lookup is
+     there. If you cannot settle it quickly, say so in the note and move on —
+     “unsure whether anything exists” is honest data.</p>
   <p>Marking relevant results is optional but nearly free while you are reading,
      and each mark becomes a golden-set entry.</p>
   <table>
-    <tr><td><kbd>Enter</kbd></td><td>save and go to the next query</td></tr>
+    <tr><td><kbd>f</kbd></td><td>focus the note field</td></tr>
+    <tr><td><kbd>Enter</kbd></td><td>in the note: save and go to the next query; otherwise focus the note</td></tr>
     <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>previous / next query</td></tr>
     <tr><td><kbd>1</kbd>–<kbd>9</kbd></td><td>toggle a result as relevant</td></tr>
-    <tr><td><kbd>Esc</kbd></td><td>leave the note field</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>leave the note field, re-enabling the shortcuts</td></tr>
+    <tr><td><kbd>/</kbd></td><td>search the corpus file list</td></tr>
+    <tr><td>open ↗</td><td>opens the file itself in a new tab</td></tr>
+    <tr><td>copy path</td><td>absolute path, for a terminal or file manager</td></tr>
     <tr><td><kbd>?</kbd></td><td>this help</td></tr>
   </table>
   <p><strong>Saturation.</strong> “since new” counts queries since a note you had
@@ -212,6 +248,38 @@ function refreshCounters() {
   $("notes").innerHTML = [...seen].map((n) => `<option value="${escapeHtml(n)}">`).join("");
 }
 
+function absPath(rel) {
+  return DATA.corpusRoot ? DATA.corpusRoot + "/" + rel : rel;
+}
+
+function fileUrl(rel) {
+  // encodeURI leaves the separators alone but escapes spaces and the Swedish
+  // characters that are common in these paths.
+  return "file://" + encodeURI(absPath(rel)).replace(/#/g, "%23");
+}
+
+async function copyPath(el) {
+  const text = el.dataset.copy;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Clipboard API is unavailable in some file:// contexts; the textarea
+    // fallback still works there.
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+  }
+  const original = el.textContent;
+  el.textContent = "copied ✓";
+  el.classList.add("done");
+  setTimeout(() => { el.textContent = original; el.classList.remove("done"); }, 1200);
+}
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -238,7 +306,11 @@ function render() {
           <span class="title">${escapeHtml(h.title)}</span>
           <span class="scores">fused ${h.fused.toFixed(4)} · rerank ${h.rerank === null ? "—" : h.rerank.toFixed(3)}</span>
         </div>
-        <div class="path">${escapeHtml(h.path)} ${escapeHtml(h.extra || "")}</div>
+        <div class="pathrow">
+          <span class="path">${escapeHtml(h.path)} ${escapeHtml(h.extra || "")}</span>
+          ${DATA.corpusRoot ? `<a class="act" href="${fileUrl(h.path)}" target="_blank" rel="noopener" data-stop>open ↗</a>` : ""}
+          <button class="act" data-copy="${escapeHtml(absPath(h.path))}" data-stop>copy path</button>
+        </div>
         <div class="snip">${escapeHtml(h.snippet)}</div>
       </div>`).join("")
     : `<div class="empty">No results returned.</div>`;
@@ -246,9 +318,15 @@ function render() {
   for (const el of document.querySelectorAll(".hit")) {
     el.onclick = () => toggle(Number(el.dataset.rank));
   }
+  // The whole card toggles relevance, so the actions inside it must not.
+  for (const el of document.querySelectorAll("[data-stop]")) {
+    el.addEventListener("click", (e) => e.stopPropagation());
+  }
+  for (const el of document.querySelectorAll("[data-copy]")) {
+    el.addEventListener("click", () => copyPath(el));
+  }
   $("note").value = r.note || "";
   $("stage").value = r.stage || "";
-  $("note").focus();
 }
 
 function toggle(rank) {
@@ -268,6 +346,40 @@ function go(delta) {
 $("next-btn").onclick = () => go(1);
 $("prev-btn").onclick = () => go(-1);
 $("help-btn").onclick = () => $("help").showModal();
+$("lookup-btn").onclick = () => openLookup();
+
+function openLookup() {
+  if (!(DATA.corpus || []).length) {
+    alert("No corpus list embedded. Rebuild with --corpus-dir to enable this.");
+    return;
+  }
+  $("lookup").showModal();
+  $("lookup-q").value = "";
+  runLookup();
+  $("lookup-q").focus();
+}
+
+function runLookup() {
+  const terms = $("lookup-q").value.toLowerCase().split(/\s+/).filter(Boolean);
+  const all = DATA.corpus || [];
+  const hits = terms.length
+    ? all.filter((p) => { const l = p.toLowerCase(); return terms.every((t) => l.includes(t)); })
+    : [];
+  $("lookup-count").textContent = terms.length
+    ? `${hits.length} of ${all.length} files match`
+    : `${all.length} indexable files — type to filter`;
+  $("lookup-results").innerHTML = hits.slice(0, 300)
+    .map((p) => `<div class="pathrow" style="margin:.15rem 0">
+        <span class="path">${escapeHtml(p)}</span>
+        ${DATA.corpusRoot ? `<a class="act" href="${fileUrl(p)}" target="_blank" rel="noopener">open ↗</a>` : ""}
+        <button class="act" data-copy="${escapeHtml(absPath(p))}">copy</button>
+      </div>`).join("")
+    + (hits.length > 300 ? `<div class="hint">…and ${hits.length - 300} more</div>` : "");
+  for (const el of $("lookup-results").querySelectorAll("[data-copy]")) {
+    el.addEventListener("click", () => copyPath(el));
+  }
+}
+$("lookup-q").addEventListener("input", runLookup);
 
 $("export-btn").onclick = () => {
   const lines = DATA.queries.map((q) => JSON.stringify({
@@ -292,18 +404,27 @@ $("export-btn").onclick = () => {
 };
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") { $("note").blur(); return; }
-  if (e.key === "Enter" && document.activeElement === $("note")) { e.preventDefault(); go(1); return; }
-  const typing = ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName);
-  if (e.key === "?" ) { $("help").showModal(); return; }
-  if (typing && e.key !== "ArrowLeft" && e.key !== "ArrowRight") {
-    // Digits inside the note field are text, not commands.
-    if (!/^[1-9]$/.test(e.key)) return;
-    if (document.activeElement === $("note")) return;
+  const el = document.activeElement;
+  const typing = el && ["INPUT", "SELECT", "TEXTAREA"].includes(el.tagName);
+  const dialogOpen = document.querySelector("dialog[open]");
+
+  // A dialog owns the keyboard while it is up; it closes itself on Escape.
+  if (dialogOpen) return;
+
+  if (typing) {
+    if (e.key === "Escape") { el.blur(); return; }
+    // Everything else is text — digits belong in the note, not in the
+    // relevance shortcuts.
+    if (e.key === "Enter" && el === $("note")) { e.preventDefault(); go(1); el.blur(); }
+    return;
   }
-  if (e.key === "ArrowRight") { e.preventDefault(); go(1); }
-  else if (e.key === "ArrowLeft") { e.preventDefault(); go(-1); }
-  else if (/^[1-9]$/.test(e.key)) { e.preventDefault(); toggle(Number(e.key)); }
+
+  if (e.key === "?") { $("help").showModal(); return; }
+  if (e.key === "/") { e.preventDefault(); openLookup(); return; }
+  if (e.key === "f" || e.key === "Enter") { e.preventDefault(); $("note").focus(); return; }
+  if (e.key === "ArrowRight" || e.key === "n") { e.preventDefault(); go(1); return; }
+  if (e.key === "ArrowLeft" || e.key === "p") { e.preventDefault(); go(-1); return; }
+  if (/^[1-9]$/.test(e.key)) { e.preventDefault(); toggle(Number(e.key)); }
 });
 
 window.addEventListener("beforeunload", save);

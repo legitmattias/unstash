@@ -129,7 +129,26 @@ def parse_traces(path: Path) -> tuple[list[dict], str]:
     return queries, "\n".join(header).strip()
 
 
-def build(traces: Path, out: Path) -> None:
+def corpus_index(corpus_dir: Path) -> list[str]:
+    """Relative paths of every file the router would index.
+
+    Embedded so the reviewer can check whether a document they expected even
+    exists. Without it, "retrieved nothing because nothing matched" and
+    "retrieved nothing because retrieval failed" are indistinguishable from the
+    result list — and they have opposite fixes.
+    """
+    from unstash.documents.mime import detect_mime
+    from unstash.documents.strategy import ParseStrategy, select_strategy
+
+    chunkable = {ParseStrategy.EXTRACT, ParseStrategy.CONVERT_THEN_EXTRACT}
+    return [
+        str(p.relative_to(corpus_dir))
+        for p in sorted(corpus_dir.rglob("*"))
+        if p.is_file() and select_strategy(detect_mime(p)) in chunkable
+    ]
+
+
+def build(traces: Path, out: Path, corpus_dir: Path | None) -> None:
     """Write a self-contained annotation page for ``traces``."""
     if not TEMPLATE.exists():
         sys.exit(f"template missing: {TEMPLATE}")
@@ -137,10 +156,15 @@ def build(traces: Path, out: Path) -> None:
     if not queries:
         sys.exit(f"no query blocks found in {traces} — is it a trace report?")
 
+    corpus = corpus_index(corpus_dir) if corpus_dir else []
     payload = {
         "source": str(traces),
         "header": header,
         "queries": queries,
+        "corpus": corpus,
+        # Absolute root, so the page can turn a stored relative path into a
+        # file:// link and into something worth copying into a terminal.
+        "corpusRoot": str(corpus_dir.resolve()) if corpus_dir else "",
     }
     html = TEMPLATE.read_text(encoding="utf-8").replace(
         "/*__DATA__*/null",
@@ -150,6 +174,13 @@ def build(traces: Path, out: Path) -> None:
     out.write_text(html, encoding="utf-8")
     total_hits = sum(len(q["hits"]) for q in queries)
     print(f"{len(queries)} queries, {total_hits} results -> {out}")
+    if corpus:
+        print(f"corpus lookup enabled over {len(corpus)} indexable files")
+    else:
+        print(
+            "no --corpus-dir: lookup disabled, so 'not retrieved' vs 'not there' "
+            "cannot be told apart while reviewing"
+        )
     print("open it in a browser; judgements are kept in local storage as you go")
 
 
@@ -227,6 +258,12 @@ def main() -> None:
     build_cmd = sub.add_parser("build", help="make the annotation page")
     build_cmd.add_argument("--traces", type=Path, required=True)
     build_cmd.add_argument("--out", type=Path, required=True)
+    build_cmd.add_argument(
+        "--corpus-dir",
+        type=Path,
+        help="Indexed corpus. Embeds a searchable file list so the reviewer can "
+        "check whether an expected document exists at all.",
+    )
 
     tax_cmd = sub.add_parser("taxonomy", help="group exported notes into counts")
     tax_cmd.add_argument("--annotations", type=Path, required=True)
@@ -234,7 +271,7 @@ def main() -> None:
 
     args = parser.parse_args()
     if args.command == "build":
-        build(args.traces, args.out)
+        build(args.traces, args.out, args.corpus_dir)
     else:
         taxonomy(args.annotations, args.out)
 
