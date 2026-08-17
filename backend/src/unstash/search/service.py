@@ -87,6 +87,43 @@ def make_snippet(text: str, query: str, *, max_chars: int = _SNIPPET_MAX_CHARS) 
     return f"{prefix}{core}{suffix}"
 
 
+@dataclass(frozen=True, slots=True)
+class HitProvenance:
+    """Where one returned document came from, stage by stage.
+
+    Ranks are 1-based and refer to the document's best chunk. ``None`` for a
+    leg means that leg did not return the document at all, which is a different
+    statement from returning it last.
+    """
+
+    vector_rank: int | None
+    bm25_rank: int | None
+    bm25_score: float | None
+    fused_rank: int
+    final_rank: int
+
+
+@dataclass(frozen=True, slots=True)
+class SearchExplain:
+    """Per-stage detail for one query, populated only when asked for.
+
+    The ranked list a caller receives is the end of the pipeline, which makes
+    several distinct failures look identical: a document neither leg retrieved,
+    one retrieved but dropped at fusion, and one fused but demoted by the
+    reranker all appear simply as absent. Separating them requires the
+    intermediate rankings, so they are carried here rather than discarded.
+
+    ``candidates`` is the full document-level fused ordering, not the truncated
+    result list — answering "where did the document I expected actually rank"
+    is the point, and that answer usually lies past the returned results.
+    """
+
+    vector_pool: dict[uuid.UUID, int]
+    bm25_pool: dict[uuid.UUID, tuple[int, float]]
+    candidates: list[tuple[uuid.UUID, float]]
+    provenance: dict[uuid.UUID, HitProvenance]
+
+
 @dataclass(slots=True)
 class SearchOutcome:
     """Ranked hits plus how the ranking was produced."""
@@ -94,6 +131,7 @@ class SearchOutcome:
     hits: list[SearchHit]
     reranked: bool
     bm25_used: bool
+    explain: SearchExplain | None = None
 
 
 @dataclass(slots=True)
@@ -207,6 +245,49 @@ def _ms_since(start: float) -> float:
     return round((time.perf_counter() - start) * 1000, 2)
 
 
+def _document_ranks(rows: Sequence[RowMapping]) -> dict[uuid.UUID, int]:
+    """Best 1-based rank per document in a chunk-level ranking.
+
+    A document can hold several chunks in one leg's pool; the earliest is the
+    one that decides how well the leg found the document.
+    """
+    ranks: dict[uuid.UUID, int] = {}
+    for position, row in enumerate(rows, start=1):
+        ranks.setdefault(row["document_id"], position)
+    return ranks
+
+
+def _build_explain(
+    vector_rows: Sequence[RowMapping],
+    bm25_rows: Sequence[RowMapping],
+    candidates: list[_Candidate],
+    hits: list[SearchHit],
+) -> SearchExplain:
+    """Assemble per-stage detail from the rankings the pipeline already built."""
+    vector_pool = _document_ranks(vector_rows)
+    bm25_pool: dict[uuid.UUID, tuple[int, float]] = {}
+    for position, row in enumerate(bm25_rows, start=1):
+        bm25_pool.setdefault(row["document_id"], (position, float(row["score"])))
+
+    fused_rank = {c.document_id: i for i, c in enumerate(candidates, start=1)}
+    provenance = {}
+    for final, hit in enumerate(hits, start=1):
+        bm25 = bm25_pool.get(hit.document_id)
+        provenance[hit.document_id] = HitProvenance(
+            vector_rank=vector_pool.get(hit.document_id),
+            bm25_rank=bm25[0] if bm25 else None,
+            bm25_score=bm25[1] if bm25 else None,
+            fused_rank=fused_rank[hit.document_id],
+            final_rank=final,
+        )
+    return SearchExplain(
+        vector_pool=vector_pool,
+        bm25_pool=bm25_pool,
+        candidates=[(c.document_id, c.fused_score) for c in candidates],
+        provenance=provenance,
+    )
+
+
 async def run_search(  # noqa: PLR0913, PLR0915 — a linear pipeline with per-stage timing
     session: AsyncSession,
     *,
@@ -216,8 +297,14 @@ async def run_search(  # noqa: PLR0913, PLR0915 — a linear pipeline with per-s
     reranker: Reranker,
     settings: Settings,
     filters: SearchFilters | None = None,
+    explain: bool = False,
 ) -> SearchOutcome:
-    """Run the hybrid pipeline for ``query`` inside the org-scoped session."""
+    """Run the hybrid pipeline for ``query`` inside the org-scoped session.
+
+    ``explain`` attaches the intermediate rankings to the outcome. It costs one
+    pass over rankings already in memory and is off by default; nothing on the
+    request path asks for it.
+    """
     started = time.perf_counter()
     filters = filters or SearchFilters()
     embed_start = time.perf_counter()
@@ -333,6 +420,8 @@ async def run_search(  # noqa: PLR0913, PLR0915 — a linear pipeline with per-s
         for i, c in enumerate(to_rerank[:limit])
     ]
 
+    detail = _build_explain(vector_rows, bm25_rows, candidates, hits) if explain else None
+
     # Per-stage trace for observability (Loki). The query text is not logged —
     # only its length — since it can carry sensitive content; search_logs holds
     # the query itself under org-scoped RLS.
@@ -354,4 +443,4 @@ async def run_search(  # noqa: PLR0913, PLR0915 — a linear pipeline with per-s
         rerank_ms=rerank_ms,
         total_ms=_ms_since(started),
     )
-    return SearchOutcome(hits=hits, reranked=reranked, bm25_used=bm25_used)
+    return SearchOutcome(hits=hits, reranked=reranked, bm25_used=bm25_used, explain=detail)
