@@ -270,7 +270,7 @@ def _build_explain(
         bm25_pool.setdefault(row["document_id"], (position, float(row["score"])))
 
     fused_rank = {c.document_id: i for i, c in enumerate(candidates, start=1)}
-    provenance = {}
+    provenance: dict[uuid.UUID, HitProvenance] = {}
     for final, hit in enumerate(hits, start=1):
         bm25 = bm25_pool.get(hit.document_id)
         provenance[hit.document_id] = HitProvenance(
