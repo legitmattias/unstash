@@ -3,8 +3,14 @@
 Indexes an operator-provided directory into a fresh Postgres at migration
 head using the production parser, OCR fallback and embedder, then runs a
 list of real queries through the production search pipeline
-(:func:`unstash.search.service.run_search`) and writes one trace per query
-for manual coding.
+(:func:`unstash.search.service.run_search`) and writes the result as
+structured data for the annotation tool to render.
+
+Output is three files. ``traces.jsonl`` holds one query per line, each with
+its results *and* the intermediate rankings behind them — which leg found a
+document, and where it sat before the reranker. ``<name>-run.json`` holds
+what is true of the whole run, including the document-to-paths map.
+``<name>-manifest.jsonl`` records what became of every corpus file.
 
 This is the instrument for error analysis: the step that produces a failure
 taxonomy from observed traces rather than a metric from a golden set. It
@@ -14,7 +20,7 @@ these queries, and a number computed without them would be invented.
     JINA_API_KEY=... python evals/retrieval/local_trace.py \\
         --corpus-dir /path/to/documents \\
         --queries /path/to/queries.txt \\
-        --out /path/to/traces.md
+        --out /path/to/traces.jsonl
     MISTRAL_API_KEY=... ...  --ocr        # OCR scanned PDFs via the production fallback
     ... --substitutions /path/to/subs.txt # fill <placeholder> slots in the queries
     ... --gotenberg-url http://localhost:3000  # convert legacy office formats
@@ -22,10 +28,11 @@ these queries, and a number computed without them would be invented.
 
 Which files are indexed is decided by the production strategy router, not by
 a suffix list here, so the traces reflect what the product can reach. Files
-the router sends to metadata-only or skip are counted in the report header:
-a reader coding a miss needs to know whether the document was in the index
-at all. Legacy office formats need the Gotenberg sidecar; without
-``--gotenberg-url`` they are counted alongside the rest.
+the router sends to metadata-only or skip appear in the manifest with that
+reason: a reader coding a miss needs to know whether the document was in the
+index at all, and a file that was never eligible is not a retrieval failure.
+Legacy office formats need the Gotenberg sidecar; without ``--gotenberg-url``
+they are recorded as failed conversions rather than silently missing.
 
 Queries are one per line; blank lines and ``#`` comments are ignored. A
 query still holding an unsubstituted ``<placeholder>`` is skipped and
@@ -47,6 +54,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import json
 import mimetypes
 import os
 import re
@@ -466,7 +474,7 @@ async def index_corpus(
     *,
     opts: _LoadOptions,
     embedder,
-) -> tuple[uuid.UUID, dict[uuid.UUID, list[str]], int]:
+) -> tuple[uuid.UUID, dict[uuid.UUID, list[str]], list[dict]]:
     """Insert an org and every parseable file, deduplicated by content.
 
     Identical bytes filed in two folders become one document, as in the
@@ -475,24 +483,35 @@ async def index_corpus(
     in a result list several times and read as a ranking fault.
 
     Returns the org id, a document-to-paths map (the search hit carries no
-    path, and the folder is load-bearing evidence when reading a trace), and
-    the number of files skipped.
+    path, and the folder is load-bearing evidence when reading a trace), and a
+    manifest recording what became of every file. The manifest exists because
+    "no result for this document" has four different causes — indexed,
+    collapsed into an identical copy, failed to parse, or never eligible — and
+    a reviewer who cannot tell them apart will attribute all four to retrieval.
     """
     org_id = await pool.fetchval(
         "INSERT INTO organisations (slug, name) VALUES ('local', 'Local Corpus') RETURNING id"
     )
     paths: dict[uuid.UUID, list[str]] = {}
     by_digest: dict[str, uuid.UUID] = {}
-    skipped = 0
+    manifest: list[dict] = []
     for position, path in enumerate(files, start=1):
         relpath = str(path.relative_to(corpus_dir))
         digest = hashlib.sha256(await asyncio.to_thread(path.read_bytes)).hexdigest()
         if digest in by_digest:
             paths[by_digest[digest]].append(relpath)
+            manifest.append(
+                {
+                    "path": relpath,
+                    "status": "duplicate",
+                    "document_id": str(by_digest[digest]),
+                    "same_content_as": paths[by_digest[digest]][0],
+                }
+            )
             continue
         loaded = await _load_document(path, digest, opts, embedder)
         if loaded is None:
-            skipped += 1
+            manifest.append({"path": relpath, "status": "failed", "document_id": None})
             continue
         texts, starts, ends, tokens, vectors = loaded
         mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
@@ -508,6 +527,7 @@ async def index_corpus(
         )
         by_digest[digest] = document_id
         paths[document_id] = [relpath]
+        manifest.append({"path": relpath, "status": "indexed", "document_id": str(document_id)})
         for index, text in enumerate(texts):
             await pool.execute(
                 "INSERT INTO chunks (org_id, document_id, chunk_index, text, token_count,"
@@ -524,53 +544,78 @@ async def index_corpus(
             )
         if position % 25 == 0:
             print(f"  {position}/{len(files)} files ...", flush=True)
-    return org_id, paths, skipped
+    return org_id, paths, manifest
 
 
-def _trace_block(
-    number: int,
-    query: str,
-    outcome,
-    paths: dict[uuid.UUID, list[str]],
-    top_k: int,
-) -> str:
-    """One query's trace, with a blank coding line for the reader to fill in."""
-    lines = [
-        f"## {number}. {query}",
-        "",
-        f"`results={len(outcome.hits)}` `reranked={outcome.reranked}` `bm25={outcome.bm25_used}`",
-        "",
-    ]
-    if not outcome.hits:
-        lines += ["_No results._", ""]
-    for rank, hit in enumerate(outcome.hits[:top_k], start=1):
-        rerank = "—" if hit.rerank_score is None else f"{hit.rerank_score:.3f}"
-        # Snippets span chunk line breaks; a newline would end the blockquote
-        # and render the remainder as body text or a list.
-        snippet = " ".join(hit.snippet.split())
-        filings = paths.get(hit.document_id, ["?"])
-        where = f"`{filings[0]}`"
-        if len(filings) > 1:
-            where += f" (+{len(filings) - 1} more filing(s) of the same content)"
-        lines += [
-            f"**{rank}. {hit.title}** · `{hit.mime_type}` · fused {hit.score:.4f} · rerank {rerank}",
-            f"  {where}",
-            f"  > {snippet}",
-            "",
-        ]
-    # First upstream failure only: a downstream cascade recorded as several
-    # codes inflates every count derived from this file.
-    lines += ["`first_failure:` ", "", "---", ""]
-    return "\n".join(lines)
+def _query_record(number: int, query: str, outcome, top_k: int) -> dict:
+    """One query as structured data, including where each result came from.
 
+    The returned list is the end of the pipeline; on its own it cannot
+    distinguish a document neither leg retrieved from one the reranker
+    demoted. ``run_search(explain=True)`` carries the intermediate rankings,
+    and they are recorded here rather than flattened away.
 
-def _error_block(number: int, query: str, detail: str) -> str:
-    """A placeholder block for a query the pipeline could not answer at all.
-
-    A failed call is not a retrieval result and must not be coded as one, so
-    the block carries no coding line.
+    ``candidates`` is the full fused ordering, not the shown results — the
+    question "where did the document I expected actually rank" is normally
+    answered outside the top k.
     """
-    return "\n".join([f"## {number}. {query}", "", f"**Query failed:** {detail}", "", "---", ""])
+    detail = outcome.explain
+    hits = []
+    for rank, hit in enumerate(outcome.hits[:top_k], start=1):
+        prov = detail.provenance.get(hit.document_id) if detail else None
+        hits.append(
+            {
+                "rank": rank,
+                "document_id": str(hit.document_id),
+                "title": hit.title,
+                "mime": hit.mime_type,
+                "fused": hit.score,
+                "rerank": hit.rerank_score,
+                "snippet": hit.snippet,
+                "excerpt": hit.excerpt,
+                "vector_rank": prov.vector_rank if prov else None,
+                "bm25_rank": prov.bm25_rank if prov else None,
+                "bm25_score": prov.bm25_score if prov else None,
+                "fused_rank": prov.fused_rank if prov else None,
+            }
+        )
+    record = {
+        "n": number,
+        "query": query,
+        "results": len(outcome.hits),
+        "reranked": outcome.reranked,
+        "bm25_used": outcome.bm25_used,
+        "failed": None,
+        "hits": hits,
+    }
+    if detail:
+        record["candidates"] = [
+            {"document_id": str(doc), "fused": score, "fused_rank": i}
+            for i, (doc, score) in enumerate(detail.candidates, start=1)
+        ]
+        record["vector_pool"] = {str(doc): rank for doc, rank in detail.vector_pool.items()}
+        record["bm25_pool"] = {
+            str(doc): {"rank": rank, "score": score}
+            for doc, (rank, score) in detail.bm25_pool.items()
+        }
+    return record
+
+
+def _error_record(number: int, query: str, detail: str) -> dict:
+    """A query the pipeline could not answer at all.
+
+    Carries ``failed`` so a reader never codes a transport error as a
+    retrieval result.
+    """
+    return {
+        "n": number,
+        "query": query,
+        "results": 0,
+        "reranked": False,
+        "bm25_used": False,
+        "failed": detail,
+        "hits": [],
+    }
 
 
 async def run(args: argparse.Namespace) -> None:
@@ -608,16 +653,17 @@ async def run(args: argparse.Namespace) -> None:
         embedder = get_embedder(settings)
         reranker = _PacedReranker(get_reranker(settings), opts.budget)
 
-        org_id, paths, skipped_files = await index_corpus(
+        org_id, paths, manifest = await index_corpus(
             pool, selection.files, args.corpus_dir, opts=opts, embedder=embedder
         )
         chunks = await pool.fetchval("SELECT count(*) FROM chunks")
+        skipped_files = sum(1 for row in manifest if row["status"] == "failed")
         print(
             f"indexed {len(paths)} documents ({chunks} chunks), {skipped_files} skipped",
             flush=True,
         )
 
-        blocks = []
+        records = []
         for number, query in enumerate(runnable, start=1):
             # Hours of indexing precede this loop and the report is written
             # after it, so one failed query must not discard the rest.
@@ -630,17 +676,24 @@ async def run(args: argparse.Namespace) -> None:
                         embedder=embedder,
                         reranker=reranker,
                         settings=settings,
+                        explain=True,
                     )
             except Exception as exc:
-                blocks.append(_error_block(number, query, f"{type(exc).__name__}: {exc}"))
+                records.append(_error_record(number, query, f"{type(exc).__name__}: {exc}"))
                 print(f"  query {number} failed ({type(exc).__name__})", flush=True)
                 continue
-            blocks.append(_trace_block(number, query, outcome, paths, args.top_k))
+            records.append(_query_record(number, query, outcome, args.top_k))
             if number % 10 == 0:
                 print(f"  {number}/{len(runnable)} queries ...", flush=True)
     shutil.rmtree(tmp_dir, ignore_errors=True)
-    _write_report(
-        args, selection, blocks, skipped_queries, _Counts(len(paths), chunks, skipped_files)
+    _write_outputs(
+        args,
+        selection,
+        records,
+        skipped_queries,
+        _Counts(len(paths), chunks, skipped_files),
+        documents={str(doc): {"paths": p} for doc, p in paths.items()},
+        manifest=manifest,
     )
 
 
@@ -653,52 +706,98 @@ class _Counts:
     skipped_files: int
 
 
-def _write_report(
+def _write_outputs(
     args: argparse.Namespace,
     selection: _Selection,
-    blocks: list[str],
+    records: list[dict],
     skipped_queries: list[str],
     counts: _Counts,
+    documents: dict[str, dict],
+    manifest: list[dict],
 ) -> None:
-    """Write the trace file, headed by everything needed to read it honestly."""
-    header = [
-        "# Retrieval traces for error analysis",
-        "",
-        f"{counts.documents} documents ({counts.chunks} chunks) · {len(blocks)} queries "
-        f"· embedder={args.embedder} · reranker={args.reranker} · ocr={args.ocr}",
-        "",
-        "Fill `first_failure:` with the **first upstream** failure only. Leave it "
-        "blank when the result set is adequate.",
-        "",
-    ]
-    # What was never indexed cannot be retrieved, and a reader coding a miss
-    # needs to know whether the document was in the index at all.
-    if selection.sampled:
-        header += [
-            f"**Sampled run**: {len(selection.files)} of {selection.chunkable_total} chunkable "
-            f"documents (seed {args.sample_seed}). Most of the archive is absent, so a miss "
-            "here carries no information about retrieval quality.",
-            "",
-        ]
-    unindexed = [
-        f"{count} routed to {strategy}" for strategy, count in sorted(selection.declined.items())
-    ]
-    if counts.skipped_files:
-        unindexed.append(f"{counts.skipped_files} failed to parse, convert, OCR or embed")
-    if unindexed:
-        scope = "whole directory" if selection.sampled else "corpus"
-        header += [f"Not indexed ({scope}): {'; '.join(unindexed)}.", ""]
-    if skipped_queries:
-        header += [
-            f"{len(skipped_queries)} queries skipped for unfilled placeholders:",
-            "",
-            *(f"- {q}" for q in skipped_queries),
-            "",
-        ]
-    header += ["---", ""]
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text("\n".join(header) + "\n".join(blocks), encoding="utf-8")
-    print(f"\nwritten to {args.out}", flush=True)
+    """Write the run in three files, each answering a different question.
+
+    ``traces.jsonl`` — one query per line. Structured rather than rendered:
+    an earlier markdown format was parsed with regular expressions and
+    silently dropped 28% of results when rerank scores turned out to be
+    signed. A reader that cannot fail loudly is worse than no reader.
+
+    ``run.json`` — everything true of the whole run, plus the document map.
+    Paths live here once instead of being repeated in every query record.
+
+    ``manifest.jsonl`` — what became of each corpus file. A reviewer looking
+    for a document that never appeared needs to distinguish indexed, collapsed
+    into a duplicate, failed to parse, and never eligible.
+    """
+    out = args.out
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    with out.open("w", encoding="utf-8") as handle:
+        for record in records:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    declined = dict(sorted(selection.declined.items()))
+    meta = {
+        "traces": str(out),
+        "corpus_dir": str(args.corpus_dir),
+        "queries_file": str(args.queries),
+        "embedder": args.embedder,
+        "reranker": args.reranker,
+        "ocr": args.ocr,
+        "top_k": args.top_k,
+        "documents_indexed": counts.documents,
+        "chunks": counts.chunks,
+        "files_failed": counts.skipped_files,
+        "declined_by_router": declined,
+        "sampled": selection.sampled,
+        "files_selected": len(selection.files),
+        "chunkable_total": selection.chunkable_total,
+        "sample_seed": args.sample_seed,
+        "queries_run": len(records),
+        "queries_skipped_placeholders": skipped_queries,
+        "documents": documents,
+    }
+    meta_path = out.with_name(out.stem + "-run.json")
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    manifest_path = out.with_name(out.stem + "-manifest.jsonl")
+    with manifest_path.open("w", encoding="utf-8") as handle:
+        for row in manifest:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    for row in _declined_rows(args.corpus_dir, selection):
+        with manifest_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    print(f"\nwritten:\n  {out}\n  {meta_path}\n  {manifest_path}", flush=True)
+
+
+def _declined_rows(corpus_dir: Path, selection: _Selection) -> list[dict]:
+    """Manifest rows for files the router never offered to the indexer.
+
+    Images and archives are the bulk of these. They are in the corpus and a
+    reviewer will look for them, so their absence needs a recorded reason
+    rather than looking like a retrieval miss.
+    """
+    from unstash.documents.mime import detect_mime
+    from unstash.documents.strategy import ParseStrategy, select_strategy
+
+    chunkable = {ParseStrategy.EXTRACT, ParseStrategy.CONVERT_THEN_EXTRACT}
+    rows = []
+    for path in sorted(corpus_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        strategy = select_strategy(detect_mime(path))
+        if strategy in chunkable:
+            continue
+        rows.append(
+            {
+                "path": str(path.relative_to(corpus_dir)),
+                "status": "not-indexable",
+                "document_id": None,
+                "router": strategy.value,
+            }
+        )
+    return rows
 
 
 def main() -> None:
