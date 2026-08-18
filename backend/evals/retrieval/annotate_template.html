@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trace review</title>
+<style>
+  :root {
+    --bg: #fbfaf8; --panel: #fff; --ink: #1b1a18; --muted: #6b6660;
+    --line: #e3ded6; --accent: #7a4d2b; --accent-soft: #f2e9e1;
+    --good: #2f6b46; --warn: #8a6d1f;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16150f; --panel: #1e1d16; --ink: #eae6dd; --muted: #9b948a;
+      --line: #322f26; --accent: #d39a6a; --accent-soft: #2a231b;
+      --good: #7fbf95; --warn: #d9bb63;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    position: sticky; top: 0; z-index: 5; background: var(--panel);
+    border-bottom: 1px solid var(--line); padding: .7rem 1.1rem;
+    display: flex; gap: 1.2rem; align-items: baseline; flex-wrap: wrap;
+  }
+  header .counter { font-variant-numeric: tabular-nums; color: var(--muted); }
+  header .bar {
+    flex: 1 1 140px; height: 6px; background: var(--line); border-radius: 3px;
+    overflow: hidden; min-width: 120px;
+  }
+  header .bar > i { display: block; height: 100%; background: var(--accent); }
+  .wrap { max-width: 60rem; margin: 0 auto; padding: 1.2rem 1.1rem 6rem; }
+  .query {
+    font-size: 1.25rem; font-weight: 600; text-wrap: balance; margin: .2rem 0 .5rem;
+  }
+  .meta { color: var(--muted); font-family: var(--mono); font-size: .8rem; }
+  .meta b { color: var(--warn); font-weight: 600; }
+  .hit {
+    background: var(--panel); border: 1px solid var(--line); border-left: 3px solid transparent;
+    border-radius: 6px; padding: .6rem .8rem; margin: .5rem 0; cursor: pointer;
+  }
+  .hit:hover { border-color: var(--muted); }
+  .hit.marked { border-left-color: var(--good); background: var(--accent-soft); }
+  .hit .top { display: flex; gap: .5rem; align-items: baseline; }
+  .hit .rank {
+    font-family: var(--mono); color: var(--muted); font-size: .8rem; min-width: 1.6rem;
+  }
+  .hit .title { font-weight: 600; }
+  .hit .scores {
+    margin-left: auto; font-family: var(--mono); font-size: .75rem; color: var(--muted);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .hit .path {
+    font-family: var(--mono); font-size: .74rem; color: var(--muted);
+    word-break: break-all; margin: .2rem 0 .3rem 2.1rem;
+  }
+  .hit .snip { margin-left: 2.1rem; color: var(--ink); font-size: .9rem; }
+  .hit .pathrow { display: flex; gap: .4rem; align-items: baseline; margin: .2rem 0 .3rem 2.1rem; }
+  .hit .pathrow .path { margin: 0; flex: 1 1 auto; }
+  .act {
+    font: inherit; font-size: .7rem; padding: .05rem .4rem; border: 1px solid var(--line);
+    border-radius: 4px; background: var(--bg); color: var(--muted);
+    cursor: pointer; text-decoration: none; white-space: nowrap; flex: 0 0 auto;
+  }
+  .act:hover { border-color: var(--accent); color: var(--accent); }
+  .act.done { color: var(--good); border-color: var(--good); }
+  .empty { color: var(--warn); font-style: italic; padding: .6rem 0; }
+  .code {
+    position: fixed; bottom: 0; left: 0; right: 0; background: var(--panel);
+    border-top: 1px solid var(--line); padding: .7rem 1.1rem;
+  }
+  .code .inner { max-width: 60rem; margin: 0 auto; display: flex; gap: .6rem; flex-wrap: wrap; }
+  .code label { font-size: .78rem; color: var(--muted); display: block; margin-bottom: .15rem; }
+  .code .note { flex: 1 1 26rem; }
+  input[type=text], select {
+    width: 100%; padding: .45rem .55rem; border: 1px solid var(--line);
+    border-radius: 5px; background: var(--bg); color: var(--ink); font: inherit;
+  }
+  input[type=text]:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .hint { color: var(--muted); font-size: .75rem; margin-top: .35rem; }
+  kbd {
+    font-family: var(--mono); font-size: .72rem; border: 1px solid var(--line);
+    border-bottom-width: 2px; border-radius: 3px; padding: 0 .3rem; background: var(--bg);
+  }
+  button {
+    font: inherit; padding: .45rem .8rem; border: 1px solid var(--line);
+    border-radius: 5px; background: var(--bg); color: var(--ink); cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  .sat {
+    display: flex; gap: 1.1rem; font-size: .78rem; color: var(--muted);
+    font-variant-numeric: tabular-nums; flex-wrap: wrap;
+  }
+  .sat b { color: var(--ink); font-weight: 600; }
+  dialog {
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+    color: var(--ink); max-width: 34rem; padding: 1.2rem 1.4rem;
+  }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  dialog h2 { margin-top: 0; }
+  dialog table { border-collapse: collapse; width: 100%; }
+  dialog td { padding: .2rem .4rem; vertical-align: top; }
+  dialog td:first-child { white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<header>
+  <strong>Trace review</strong>
+  <span class="counter" id="counter">–</span>
+  <span class="bar"><i id="bar" style="width:0%"></i></span>
+  <span class="sat">
+    <span>distinct notes <b id="distinct">0</b></span>
+    <span>since new <b id="sincenew">0</b></span>
+    <span>coded <b id="coded">0</b></span>
+  </span>
+  <button id="lookup-btn">Corpus /</button>
+  <button id="help-btn">?</button>
+  <button id="export-btn">Export</button>
+</header>
+
+<div class="wrap">
+  <div class="query" id="query">—</div>
+  <div class="meta" id="meta"></div>
+  <div id="hits"></div>
+</div>
+
+<div class="code">
+  <div class="inner">
+    <div class="note">
+      <label for="note">What is wrong with these results? Your words, no categories. Blank = they are fine.</label>
+      <input type="text" id="note" list="notes" autocomplete="off" spellcheck="false">
+      <datalist id="notes"></datalist>
+    </div>
+    <div style="flex:0 0 13rem">
+      <label for="stage">Where (optional)</label>
+      <select id="stage">
+        <option value="">—</option>
+        <option value="adequate">adequate</option>
+        <option value="not-in-index">not in index</option>
+        <option value="not-retrieved">in index, not retrieved</option>
+        <option value="ranked-low">retrieved, ranked low</option>
+        <option value="nothing-to-find">nothing to find</option>
+        <option value="unsure">unsure without checking</option>
+        <option value="wrong-snippet">right doc, wrong passage</option>
+      </select>
+    </div>
+    <div style="flex:0 0 auto; align-self:flex-end">
+      <button id="prev-btn">← Prev</button>
+      <button id="next-btn">Next →</button>
+    </div>
+    <div class="hint" style="flex:1 1 100%">
+      <kbd>1</kbd>–<kbd>9</kbd> mark relevant · <kbd>f</kbd> write a note ·
+      <kbd>Enter</kbd> save and next · <kbd>←</kbd><kbd>→</kbd> move ·
+      <kbd>/</kbd> does it exist · <kbd>?</kbd> help.
+      Describe the <em>symptom</em>; the cause comes later.
+    </div>
+  </div>
+</div>
+
+<dialog id="lookup">
+  <h2>Does it exist?</h2>
+  <p>Search every file the indexer would have read, by name or folder. This is how
+     you tell <em>“retrieval missed it”</em> from <em>“there is nothing to find”</em> —
+     which look identical in the result list and need opposite fixes.</p>
+  <input type="text" id="lookup-q" placeholder="besiktning, 1974, ritning…" autocomplete="off">
+  <div class="hint" id="lookup-count"></div>
+  <div id="lookup-results" style="max-height:22rem;overflow:auto;margin-top:.5rem"></div>
+  <form method="dialog" style="margin-top:.8rem"><button>Close</button></form>
+</dialog>
+
+<dialog id="help">
+  <h2>How to use this</h2>
+  <p>Read the results and write, in your own words, what is wrong with them. Do
+     not try to fit a category — the categories come afterwards, from what you
+     wrote. If the set is fine, leave it blank.</p>
+  <p><strong>Describe what you can see.</strong> “Nothing here is about the
+     question”, “right topic but the wrong year”, “correct document at rank 8”,
+     “the snippet is from the wrong part”. You are recording a symptom, not
+     diagnosing a cause.</p>
+  <p><strong>When the cause matters, check.</strong> Press <kbd>/</kbd> to search
+     the indexed file list. If documents that should have matched are sitting
+     there unretrieved, that is a retrieval failure. If nothing relevant exists,
+     an empty-looking result set is correct behaviour and not a fault. Those two
+     are indistinguishable from the results alone, which is why the lookup is
+     there. If you cannot settle it quickly, say so in the note and move on —
+     “unsure whether anything exists” is honest data.</p>
+  <p>Marking relevant results is optional but nearly free while you are reading,
+     and each mark becomes a golden-set entry.</p>
+  <table>
+    <tr><td><kbd>f</kbd></td><td>focus the note field</td></tr>
+    <tr><td><kbd>Enter</kbd></td><td>in the note: save and go to the next query; otherwise focus the note</td></tr>
+    <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>previous / next query</td></tr>
+    <tr><td><kbd>1</kbd>–<kbd>9</kbd></td><td>toggle a result as relevant</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>leave the note field, re-enabling the shortcuts</td></tr>
+    <tr><td><kbd>/</kbd></td><td>search the corpus file list</td></tr>
+    <tr><td>open ↗</td><td>opens the file itself in a new tab</td></tr>
+    <tr><td>copy path</td><td>absolute path, for a terminal or file manager</td></tr>
+    <tr><td><kbd>?</kbd></td><td>this help</td></tr>
+  </table>
+  <p><strong>Saturation.</strong> “since new” counts queries since a note you had
+     not written before. When that number stays high for twenty or so, the shape
+     of the failure space has stopped changing and you can stop.</p>
+  <p>Work is saved in this browser as you go. <em>Export</em> writes a JSONL file;
+     feed it to <code>annotate.py taxonomy</code> for counts.</p>
+  <form method="dialog"><button>Close</button></form>
+</dialog>
+
+<script>
+const DATA = /*__DATA__*/null;
+const KEY = "unstash-annotations:" + (DATA.source || "traces");
+const state = JSON.parse(localStorage.getItem(KEY) || "{}");
+let idx = Number(localStorage.getItem(KEY + ":idx") || 0);
+
+const $ = (id) => document.getElementById(id);
+const cur = () => DATA.queries[idx];
+const rec = () => (state[cur().n] ||= { note: "", stage: "", relevant: [] });
+
+function save() {
+  const r = rec();
+  r.note = $("note").value.trim();
+  r.stage = $("stage").value;
+  localStorage.setItem(KEY, JSON.stringify(state));
+  localStorage.setItem(KEY + ":idx", String(idx));
+  refreshCounters();
+}
+
+// Saturation: how many queries since a note appeared that had not been used
+// before. Walking the record order rather than click order keeps it stable
+// when you go back and revise something.
+function refreshCounters() {
+  const seen = new Set();
+  let since = 0;
+  for (const q of DATA.queries) {
+    const note = (state[q.n]?.note || "").trim();
+    if (!note) continue;
+    if (seen.has(note)) since++; else { seen.add(note); since = 0; }
+  }
+  const coded = Object.values(state).filter((r) => (r.note || "").trim()).length;
+  $("distinct").textContent = seen.size;
+  $("sincenew").textContent = since;
+  $("coded").textContent = coded;
+  $("notes").innerHTML = [...seen].map((n) => `<option value="${escapeHtml(n)}">`).join("");
+}
+
+function absPath(rel) {
+  return DATA.corpusRoot ? DATA.corpusRoot + "/" + rel : rel;
+}
+
+function fileUrl(rel) {
+  // encodeURI leaves the separators alone but escapes spaces and the Swedish
+  // characters that are common in these paths.
+  return "file://" + encodeURI(absPath(rel)).replace(/#/g, "%23");
+}
+
+async function copyPath(el) {
+  const text = el.dataset.copy;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Clipboard API is unavailable in some file:// contexts; the textarea
+    // fallback still works there.
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+  }
+  const original = el.textContent;
+  el.textContent = "copied ✓";
+  el.classList.add("done");
+  setTimeout(() => { el.textContent = original; el.classList.remove("done"); }, 1200);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function render() {
+  const q = cur(), r = rec();
+  $("counter").textContent = `${idx + 1} / ${DATA.queries.length}`;
+  $("bar").style.width = ((idx + 1) / DATA.queries.length * 100) + "%";
+  $("query").textContent = q.query;
+
+  const bits = [`results=${q.results}`];
+  if (q.reranked === false) bits.push("<b>reranked=false</b>");
+  else if (q.reranked === true) bits.push("reranked=true");
+  if (q.bm25 === false) bits.push("<b>bm25=false</b>");
+  if (q.failed) bits.push("<b>query failed</b>");
+  $("meta").innerHTML = bits.join(" · ");
+
+  $("hits").innerHTML = q.hits.length
+    ? q.hits.map((h) => `
+      <div class="hit ${r.relevant.includes(h.rank) ? "marked" : ""}" data-rank="${h.rank}">
+        <div class="top">
+          <span class="rank">${h.rank}.</span>
+          <span class="title">${escapeHtml(h.title)}</span>
+          <span class="scores">fused ${h.fused.toFixed(4)} · rerank ${h.rerank === null ? "—" : h.rerank.toFixed(3)}</span>
+        </div>
+        <div class="pathrow">
+          <span class="path">${escapeHtml(h.path)} ${escapeHtml(h.extra || "")}</span>
+          ${DATA.corpusRoot ? `<a class="act" href="${fileUrl(h.path)}" target="_blank" rel="noopener" data-stop>open ↗</a>` : ""}
+          <button class="act" data-copy="${escapeHtml(absPath(h.path))}" data-stop>copy path</button>
+        </div>
+        <div class="snip">${escapeHtml(h.snippet)}</div>
+      </div>`).join("")
+    : `<div class="empty">No results returned.</div>`;
+
+  for (const el of document.querySelectorAll(".hit")) {
+    el.onclick = () => toggle(Number(el.dataset.rank));
+  }
+  // The whole card toggles relevance, so the actions inside it must not.
+  for (const el of document.querySelectorAll("[data-stop]")) {
+    el.addEventListener("click", (e) => e.stopPropagation());
+  }
+  for (const el of document.querySelectorAll("[data-copy]")) {
+    el.addEventListener("click", () => copyPath(el));
+  }
+  $("note").value = r.note || "";
+  $("stage").value = r.stage || "";
+}
+
+function toggle(rank) {
+  const r = rec();
+  const at = r.relevant.indexOf(rank);
+  if (at === -1) r.relevant.push(rank); else r.relevant.splice(at, 1);
+  save();
+  render();
+}
+
+function go(delta) {
+  save();
+  idx = Math.min(DATA.queries.length - 1, Math.max(0, idx + delta));
+  render();
+}
+
+$("next-btn").onclick = () => go(1);
+$("prev-btn").onclick = () => go(-1);
+$("help-btn").onclick = () => $("help").showModal();
+$("lookup-btn").onclick = () => openLookup();
+
+function openLookup() {
+  if (!(DATA.corpus || []).length) {
+    alert("No corpus list embedded. Rebuild with --corpus-dir to enable this.");
+    return;
+  }
+  $("lookup").showModal();
+  $("lookup-q").value = "";
+  runLookup();
+  $("lookup-q").focus();
+}
+
+function runLookup() {
+  const terms = $("lookup-q").value.toLowerCase().split(/\s+/).filter(Boolean);
+  const all = DATA.corpus || [];
+  const hits = terms.length
+    ? all.filter((p) => { const l = p.toLowerCase(); return terms.every((t) => l.includes(t)); })
+    : [];
+  $("lookup-count").textContent = terms.length
+    ? `${hits.length} of ${all.length} files match`
+    : `${all.length} indexable files — type to filter`;
+  $("lookup-results").innerHTML = hits.slice(0, 300)
+    .map((p) => `<div class="pathrow" style="margin:.15rem 0">
+        <span class="path">${escapeHtml(p)}</span>
+        ${DATA.corpusRoot ? `<a class="act" href="${fileUrl(p)}" target="_blank" rel="noopener">open ↗</a>` : ""}
+        <button class="act" data-copy="${escapeHtml(absPath(p))}">copy</button>
+      </div>`).join("")
+    + (hits.length > 300 ? `<div class="hint">…and ${hits.length - 300} more</div>` : "");
+  for (const el of $("lookup-results").querySelectorAll("[data-copy]")) {
+    el.addEventListener("click", () => copyPath(el));
+  }
+}
+$("lookup-q").addEventListener("input", runLookup);
+
+$("export-btn").onclick = () => {
+  const lines = DATA.queries.map((q) => JSON.stringify({
+    n: q.n,
+    query: q.query,
+    note: (state[q.n]?.note || "").trim(),
+    stage: state[q.n]?.stage || "",
+    relevant: (state[q.n]?.relevant || []).sort((a, b) => a - b)
+      .map((rank) => {
+        const h = q.hits.find((x) => x.rank === rank);
+        return h ? { rank, title: h.title, path: h.path } : { rank };
+      }),
+    results: q.results,
+    reranked: q.reranked,
+  }));
+  const blob = new Blob([lines.join("\n") + "\n"], { type: "application/x-ndjson" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "annotations.jsonl";
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+document.addEventListener("keydown", (e) => {
+  const el = document.activeElement;
+  const typing = el && ["INPUT", "SELECT", "TEXTAREA"].includes(el.tagName);
+  const dialogOpen = document.querySelector("dialog[open]");
+
+  // A dialog owns the keyboard while it is up; it closes itself on Escape.
+  if (dialogOpen) return;
+
+  if (typing) {
+    if (e.key === "Escape") { el.blur(); return; }
+    // Everything else is text — digits belong in the note, not in the
+    // relevance shortcuts.
+    if (e.key === "Enter" && el === $("note")) { e.preventDefault(); go(1); el.blur(); }
+    return;
+  }
+
+  if (e.key === "?") { $("help").showModal(); return; }
+  if (e.key === "/") { e.preventDefault(); openLookup(); return; }
+  if (e.key === "f" || e.key === "Enter") { e.preventDefault(); $("note").focus(); return; }
+  if (e.key === "ArrowRight" || e.key === "n") { e.preventDefault(); go(1); return; }
+  if (e.key === "ArrowLeft" || e.key === "p") { e.preventDefault(); go(-1); return; }
+  if (/^[1-9]$/.test(e.key)) { e.preventDefault(); toggle(Number(e.key)); }
+});
+
+window.addEventListener("beforeunload", save);
+refreshCounters();
+render();
+</script>
+</body>
+</html>
