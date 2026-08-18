@@ -77,11 +77,17 @@ Three files come out:
 |---|---|
 | `traces.jsonl` | one query per line: results **and** the intermediate rankings behind them |
 | `traces-run.json` | what is true of the whole run, plus the document-to-paths map |
-| `traces-manifest.jsonl` | what became of each corpus file — indexed, duplicate, failed, not-indexable |
+| `traces-manifest.jsonl` | what became of each corpus file — indexed, duplicate, failed, not-indexed |
 
 The manifest is what lets a reviewer tell a retrieval miss from a document that
-was never searchable. Those look identical in a result list and need opposite
+is not searchable yet. Those look identical in a result list and need opposite
 fixes.
+
+`not-indexed` means **no searchable text today**, not that the file cannot have
+any. It is mostly images and archives, and each row carries the reason and the
+issue tracking it. The product intent is that everything in the corpus is
+reachable by some means, so this status marks work outstanding rather than a
+decision that was made.
 
 ## 2. Build the review page
 

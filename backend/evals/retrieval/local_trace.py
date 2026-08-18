@@ -119,6 +119,7 @@ class _Selection:
 
     files: list[Path]
     declined: dict[str, int]
+    declined_files: list[tuple[str, str]]
     chunkable_total: int
 
     @property
@@ -149,6 +150,7 @@ def _find_files(
 
     chunkable: list[Path] = []
     declined: dict[str, int] = {}
+    declined_files: list[tuple[str, str]] = []
     for path in sorted(corpus_dir.rglob("*")):
         if not path.is_file():
             continue
@@ -157,14 +159,15 @@ def _find_files(
             chunkable.append(path)
         else:
             declined[strategy.value] = declined.get(strategy.value, 0) + 1
+            declined_files.append((str(path.relative_to(corpus_dir)), strategy.value))
 
     total = len(chunkable)
     if sample_seed is None or total <= max_files:
-        return _Selection(chunkable[:max_files], declined, total)
+        return _Selection(chunkable[:max_files], declined, declined_files, total)
     import random
 
     rng = random.Random(sample_seed)
-    return _Selection(sorted(rng.sample(chunkable, max_files)), declined, total)
+    return _Selection(sorted(rng.sample(chunkable, max_files)), declined, declined_files, total)
 
 
 def load_substitutions(path: Path | None) -> dict[str, str]:
@@ -764,40 +767,33 @@ def _write_outputs(
     with manifest_path.open("w", encoding="utf-8") as handle:
         for row in manifest:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-    for row in _declined_rows(args.corpus_dir, selection):
-        with manifest_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        for path, router in selection.declined_files:
+            handle.write(
+                json.dumps(
+                    {
+                        "path": path,
+                        "status": "not-indexed",
+                        "document_id": None,
+                        "router": router,
+                        "reason": _NOT_INDEXED_REASON.get(router, router),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
 
     print(f"\nwritten:\n  {out}\n  {meta_path}\n  {manifest_path}", flush=True)
 
 
-def _declined_rows(corpus_dir: Path, selection: _Selection) -> list[dict]:
-    """Manifest rows for files the router never offered to the indexer.
-
-    Images and archives are the bulk of these. They are in the corpus and a
-    reviewer will look for them, so their absence needs a recorded reason
-    rather than looking like a retrieval miss.
-    """
-    from unstash.documents.mime import detect_mime
-    from unstash.documents.strategy import ParseStrategy, select_strategy
-
-    chunkable = {ParseStrategy.EXTRACT, ParseStrategy.CONVERT_THEN_EXTRACT}
-    rows = []
-    for path in sorted(corpus_dir.rglob("*")):
-        if not path.is_file():
-            continue
-        strategy = select_strategy(detect_mime(path))
-        if strategy in chunkable:
-            continue
-        rows.append(
-            {
-                "path": str(path.relative_to(corpus_dir)),
-                "status": "not-indexable",
-                "document_id": None,
-                "router": strategy.value,
-            }
-        )
-    return rows
+# Why a file the router declined has no searchable content *today*. These are
+# gaps with open work behind them, not properties of the files: the product
+# intent is that everything in the corpus is reachable by some means.
+_NOT_INDEXED_REASON = {
+    "metadata_only": (
+        "no text extracted yet — images need OCR (#186), archives need expanding (#185)"
+    ),
+    "skip": "format refused by the router (#187)",
+}
 
 
 def main() -> None:

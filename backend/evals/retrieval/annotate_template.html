@@ -67,7 +67,7 @@
   .prov .miss { color: var(--warn); }
   .status { font-family: var(--mono); font-size: .68rem; padding: 0 .3rem; border-radius: 3px; }
   .status.indexed { color: var(--good); }
-  .status.duplicate, .status.failed, .status.not-indexable { color: var(--warn); }
+  .status.duplicate, .status.failed, .status.not-indexed { color: var(--warn); }
   .hit .pathrow { display: flex; gap: .4rem; align-items: baseline; margin: .2rem 0 .3rem 2.1rem; }
   .hit .pathrow .path { margin: 0; flex: 1 1 auto; }
   .act {
@@ -178,7 +178,8 @@
      <span class="status indexed">indexed</span> searchable ·
      <span class="status duplicate">duplicate</span> identical content to another path, indexed once ·
      <span class="status failed">failed</span> could not be parsed, converted or OCR'd ·
-     <span class="status not-indexable">not-indexable</span> image or archive, never offered to the indexer.
+     <span class="status not-indexed">not-indexed</span> no searchable text <em>yet</em> — mostly
+     images and archives, which are open work rather than a decision.
   </p>
   <p>This is how you tell <em>“retrieval missed it”</em> from <em>“it was never
      searchable”</em> — which look identical in the result list and need opposite fixes.</p>
@@ -405,7 +406,7 @@ function runLookup() {
     : `${all.length} files in the corpus — type to filter`;
   $("lookup-results").innerHTML = hits.slice(0, 300)
     .map((r) => `<div class="pathrow" style="margin:.15rem 0">
-        <span class="status ${r.status}">${r.status}</span>
+        <span class="status ${r.status}" title="${escapeHtml(r.reason || r.status)}">${r.status}</span>
         <span class="path">${escapeHtml(r.path)}</span>
         ${DATA.corpusRoot ? `<a class="act" href="${fileUrl(r.path)}" target="_blank" rel="noopener">open ↗</a>` : ""}
         <button class="act" data-copy="${escapeHtml(absPath(r.path))}">copy</button>
