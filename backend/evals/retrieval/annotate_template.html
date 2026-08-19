@@ -60,6 +60,14 @@
     word-break: break-all; margin: .2rem 0 .3rem 2.1rem;
   }
   .hit .snip { margin-left: 2.1rem; color: var(--ink); font-size: .9rem; }
+  .prov {
+    margin-left: 2.1rem; font-family: var(--mono); font-size: .72rem; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .prov .miss { color: var(--warn); }
+  .status { font-family: var(--mono); font-size: .68rem; padding: 0 .3rem; border-radius: 3px; }
+  .status.indexed { color: var(--good); }
+  .status.duplicate, .status.failed, .status.not-indexed { color: var(--warn); }
   .hit .pathrow { display: flex; gap: .4rem; align-items: baseline; margin: .2rem 0 .3rem 2.1rem; }
   .hit .pathrow .path { margin: 0; flex: 1 1 auto; }
   .act {
@@ -165,9 +173,16 @@
 
 <dialog id="lookup">
   <h2>Does it exist?</h2>
-  <p>Search every file the indexer would have read, by name or folder. This is how
-     you tell <em>“retrieval missed it”</em> from <em>“there is nothing to find”</em> —
-     which look identical in the result list and need opposite fixes.</p>
+  <p>Search every file in the corpus by name or folder, with what became of it:</p>
+  <p style="font-size:.85rem">
+     <span class="status indexed">indexed</span> searchable ·
+     <span class="status duplicate">duplicate</span> identical content to another path, indexed once ·
+     <span class="status failed">failed</span> could not be parsed, converted or OCR'd ·
+     <span class="status not-indexed">not-indexed</span> no searchable text <em>yet</em> — mostly
+     images and archives, which are open work rather than a decision.
+  </p>
+  <p>This is how you tell <em>“retrieval missed it”</em> from <em>“it was never
+     searchable”</em> — which look identical in the result list and need opposite fixes.</p>
   <input type="text" id="lookup-q" placeholder="besiktning, 1974, ritning…" autocomplete="off">
   <div class="hint" id="lookup-count"></div>
   <div id="lookup-results" style="max-height:22rem;overflow:auto;margin-top:.5rem"></div>
@@ -248,6 +263,25 @@ function refreshCounters() {
   $("notes").innerHTML = [...seen].map((n) => `<option value="${escapeHtml(n)}">`).join("");
 }
 
+function pathsFor(documentId) {
+  return (DATA.documents?.[documentId]?.paths) || ["?"];
+}
+
+function filingSuffix(documentId) {
+  const n = pathsFor(documentId).length;
+  return n > 1 ? ` (+${n - 1} more filing${n > 2 ? "s" : ""} of the same content)` : "";
+}
+
+// Which leg found this, and what each stage did with it. A dash means the leg
+// did not return the document at all — different from returning it last.
+function provenance(h) {
+  const v = h.vector_rank ? `vector #${h.vector_rank}` : `<span class="miss">vector —</span>`;
+  const b = h.bm25_rank ? `bm25 #${h.bm25_rank}` : `<span class="miss">bm25 —</span>`;
+  const moved = h.fused_rank && h.fused_rank !== h.rank
+    ? ` → shown #${h.rank}` : ` → shown #${h.rank}`;
+  return `${v} · ${b} · fused #${h.fused_rank ?? "?"}${moved}`;
+}
+
 function absPath(rel) {
   return DATA.corpusRoot ? DATA.corpusRoot + "/" + rel : rel;
 }
@@ -306,10 +340,11 @@ function render() {
           <span class="title">${escapeHtml(h.title)}</span>
           <span class="scores">fused ${h.fused.toFixed(4)} · rerank ${h.rerank === null ? "—" : h.rerank.toFixed(3)}</span>
         </div>
+        <div class="prov">${provenance(h)}</div>
         <div class="pathrow">
-          <span class="path">${escapeHtml(h.path)} ${escapeHtml(h.extra || "")}</span>
-          ${DATA.corpusRoot ? `<a class="act" href="${fileUrl(h.path)}" target="_blank" rel="noopener" data-stop>open ↗</a>` : ""}
-          <button class="act" data-copy="${escapeHtml(absPath(h.path))}" data-stop>copy path</button>
+          <span class="path">${escapeHtml(pathsFor(h.document_id)[0])}${filingSuffix(h.document_id)}</span>
+          ${DATA.corpusRoot ? `<a class="act" href="${fileUrl(pathsFor(h.document_id)[0])}" target="_blank" rel="noopener" data-stop>open ↗</a>` : ""}
+          <button class="act" data-copy="${escapeHtml(absPath(pathsFor(h.document_id)[0]))}" data-stop>copy path</button>
         </div>
         <div class="snip">${escapeHtml(h.snippet)}</div>
       </div>`).join("")
@@ -363,16 +398,18 @@ function runLookup() {
   const terms = $("lookup-q").value.toLowerCase().split(/\s+/).filter(Boolean);
   const all = DATA.corpus || [];
   const hits = terms.length
-    ? all.filter((p) => { const l = p.toLowerCase(); return terms.every((t) => l.includes(t)); })
+    ? all.filter((r) => { const l = r.path.toLowerCase(); return terms.every((t) => l.includes(t)); })
     : [];
+  const indexed = hits.filter((r) => r.status === "indexed").length;
   $("lookup-count").textContent = terms.length
-    ? `${hits.length} of ${all.length} files match`
-    : `${all.length} indexable files — type to filter`;
+    ? `${hits.length} of ${all.length} files match — ${indexed} of them searchable`
+    : `${all.length} files in the corpus — type to filter`;
   $("lookup-results").innerHTML = hits.slice(0, 300)
-    .map((p) => `<div class="pathrow" style="margin:.15rem 0">
-        <span class="path">${escapeHtml(p)}</span>
-        ${DATA.corpusRoot ? `<a class="act" href="${fileUrl(p)}" target="_blank" rel="noopener">open ↗</a>` : ""}
-        <button class="act" data-copy="${escapeHtml(absPath(p))}">copy</button>
+    .map((r) => `<div class="pathrow" style="margin:.15rem 0">
+        <span class="status ${r.status}" title="${escapeHtml(r.reason || r.status)}">${r.status}</span>
+        <span class="path">${escapeHtml(r.path)}</span>
+        ${DATA.corpusRoot ? `<a class="act" href="${fileUrl(r.path)}" target="_blank" rel="noopener">open ↗</a>` : ""}
+        <button class="act" data-copy="${escapeHtml(absPath(r.path))}">copy</button>
       </div>`).join("")
     + (hits.length > 300 ? `<div class="hint">…and ${hits.length - 300} more</div>` : "");
   for (const el of $("lookup-results").querySelectorAll("[data-copy]")) {

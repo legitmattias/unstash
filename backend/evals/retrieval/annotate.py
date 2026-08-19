@@ -5,10 +5,11 @@ in decides whether that actually happens. A single long markdown file means
 scrolling to find where one query ends and the next begins, and it offers
 nowhere to put a judgement except the file itself.
 
-Two subcommands:
+Three subcommands:
 
-    python evals/retrieval/annotate.py build --traces traces.md --out review.html
+    python evals/retrieval/annotate.py build --traces traces.jsonl --out review.html
     python evals/retrieval/annotate.py taxonomy --annotations annotations.jsonl
+    python evals/retrieval/annotate.py render --traces traces.jsonl --out traces.md
 
 ``build`` produces a **self-contained HTML file** — data embedded, no server, no
 dependencies, opens with a double click. Judgements are held in the browser's
@@ -16,6 +17,9 @@ local storage as you go and exported as JSONL when you are done.
 
 ``taxonomy`` is the axial-coding pass: it groups the exported notes, counts
 them, and writes the failure taxonomy that error analysis exists to produce.
+
+``render`` writes a readable markdown dump. It is a view of the structured
+traces and never a source for them — the data flows one way.
 
 ## Why the tool is shaped this way
 
@@ -45,126 +49,57 @@ from __future__ import annotations
 import argparse
 import collections
 import json
-import re
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 TEMPLATE = HERE / "annotate_template.html"
 
-# Blocks look like: "## 12. query text" then a metadata line, then results.
-_BLOCK = re.compile(r"^## (\d+)\. (.+)$")
-_META = re.compile(r"`results=(\d+)`\s+`reranked=(\w+)`\s+`bm25=(\w+)`")
-# Rerank scores are signed: the cross-encoder emits negatives for poor
-# matches, so a pattern without the minus silently drops ~28% of results
-# and misreads the rest as positive.
-_HIT = re.compile(r"^\*\*(\d+)\. (.+?)\*\* · `(.+?)` · fused (-?[0-9.]+) · rerank (—|-?[0-9.]+)$")
-_PATH = re.compile(r"^\s+`(.+?)`(.*)$")
-_SNIPPET = re.compile(r"^\s+> (.*)$")
 
+def load_run(traces: Path) -> tuple[list[dict], dict, list[dict]]:
+    """Load the three files a trace run produces.
 
-def parse_traces(path: Path) -> tuple[list[dict], str]:
-    """Parse a trace report into query records, plus the report header."""
-    lines = path.read_text(encoding="utf-8").splitlines()
-    header: list[str] = []
-    queries: list[dict] = []
-    current: dict | None = None
-    hit: dict | None = None
-
-    for line in lines:
-        block = _BLOCK.match(line)
-        if block:
-            if current:
-                queries.append(current)
-            current = {
-                "n": int(block.group(1)),
-                "query": block.group(2).strip(),
-                "results": 0,
-                "reranked": None,
-                "bm25": None,
-                "hits": [],
-                "failed": False,
-            }
-            hit = None
-            continue
-        if current is None:
-            header.append(line)
-            continue
-
-        if line.startswith("**Query failed:**"):
-            current["failed"] = True
-            continue
-        meta = _META.search(line)
-        if meta:
-            current["results"] = int(meta.group(1))
-            current["reranked"] = meta.group(2) == "True"
-            current["bm25"] = meta.group(3) == "True"
-            continue
-        found = _HIT.match(line)
-        if found:
-            hit = {
-                "rank": int(found.group(1)),
-                "title": found.group(2),
-                "mime": found.group(3),
-                "fused": float(found.group(4)),
-                "rerank": None if found.group(5) == "—" else float(found.group(5)),
-                "path": "",
-                "extra": "",
-                "snippet": "",
-            }
-            current["hits"].append(hit)
-            continue
-        if hit is not None:
-            where = _PATH.match(line)
-            if where and not hit["path"]:
-                hit["path"] = where.group(1)
-                hit["extra"] = where.group(2).strip()
-                continue
-            snippet = _SNIPPET.match(line)
-            if snippet:
-                hit["snippet"] = snippet.group(1)
-
-    if current:
-        queries.append(current)
-    return queries, "\n".join(header).strip()
-
-
-def corpus_index(corpus_dir: Path) -> list[str]:
-    """Relative paths of every file the router would index.
-
-    Embedded so the reviewer can check whether a document they expected even
-    exists. Without it, "retrieved nothing because nothing matched" and
-    "retrieved nothing because retrieval failed" are indistinguishable from the
-    result list — and they have opposite fixes.
+    Only ``traces.jsonl`` is required. The run metadata carries the
+    document-to-paths map, and the manifest says what became of every corpus
+    file; without them the page still works, but a reviewer loses the ability
+    to tell a retrieval miss from a document that was never indexed.
     """
-    from unstash.documents.mime import detect_mime
-    from unstash.documents.strategy import ParseStrategy, select_strategy
-
-    chunkable = {ParseStrategy.EXTRACT, ParseStrategy.CONVERT_THEN_EXTRACT}
-    return [
-        str(p.relative_to(corpus_dir))
-        for p in sorted(corpus_dir.rglob("*"))
-        if p.is_file() and select_strategy(detect_mime(p)) in chunkable
+    records = [
+        json.loads(line) for line in traces.read_text(encoding="utf-8").splitlines() if line.strip()
     ]
+    meta_path = traces.with_name(traces.stem + "-run.json")
+    meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+
+    manifest_path = traces.with_name(traces.stem + "-manifest.jsonl")
+    manifest = (
+        [
+            json.loads(line)
+            for line in manifest_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        if manifest_path.exists()
+        else []
+    )
+    return records, meta, manifest
 
 
-def build(traces: Path, out: Path, corpus_dir: Path | None) -> None:
-    """Write a self-contained annotation page for ``traces``."""
+def build(traces: Path, out: Path, corpus_root: str | None) -> None:
+    """Write a self-contained annotation page for a trace run."""
     if not TEMPLATE.exists():
         sys.exit(f"template missing: {TEMPLATE}")
-    queries, header = parse_traces(traces)
-    if not queries:
-        sys.exit(f"no query blocks found in {traces} — is it a trace report?")
+    records, meta, manifest = load_run(traces)
+    if not records:
+        sys.exit(f"no records in {traces} — is it a traces.jsonl from local_trace.py?")
 
-    corpus = corpus_index(corpus_dir) if corpus_dir else []
     payload = {
         "source": str(traces),
-        "header": header,
-        "queries": queries,
-        "corpus": corpus,
+        "queries": records,
+        "documents": meta.get("documents", {}),
+        "corpus": manifest,
         # Absolute root, so the page can turn a stored relative path into a
         # file:// link and into something worth copying into a terminal.
-        "corpusRoot": str(corpus_dir.resolve()) if corpus_dir else "",
+        "corpusRoot": corpus_root or meta.get("corpus_dir", ""),
+        "meta": {k: v for k, v in meta.items() if k not in ("documents",)},
     }
     html = TEMPLATE.read_text(encoding="utf-8").replace(
         "/*__DATA__*/null",
@@ -172,16 +107,60 @@ def build(traces: Path, out: Path, corpus_dir: Path | None) -> None:
     )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
-    total_hits = sum(len(q["hits"]) for q in queries)
-    print(f"{len(queries)} queries, {total_hits} results -> {out}")
-    if corpus:
-        print(f"corpus lookup enabled over {len(corpus)} indexable files")
+
+    hits = sum(len(r["hits"]) for r in records)
+    print(f"{len(records)} queries, {hits} results -> {out}")
+    if manifest:
+        counts = collections.Counter(row["status"] for row in manifest)
+        print("corpus lookup: " + ", ".join(f"{n} {s}" for s, n in counts.most_common()))
     else:
         print(
-            "no --corpus-dir: lookup disabled, so 'not retrieved' vs 'not there' "
-            "cannot be told apart while reviewing"
+            "no manifest beside the traces: the lookup cannot say whether a file "
+            "was indexed, deduplicated or skipped"
         )
     print("open it in a browser; judgements are kept in local storage as you go")
+
+
+def render(traces: Path, out: Path) -> None:
+    """Render a readable markdown dump from the structured traces.
+
+    A view, never a source. An earlier version had this the other way round —
+    markdown written first and parsed back with regular expressions — which
+    silently dropped 28% of results the day rerank scores turned out to be
+    signed.
+    """
+    records, meta, _ = load_run(traces)
+    documents = meta.get("documents", {})
+    lines = [f"# Retrieval traces — {len(records)} queries", ""]
+    for record in records:
+        lines += [f"## {record['n']}. {record['query']}", ""]
+        if record.get("failed"):
+            lines += [f"**Query failed:** {record['failed']}", "", "---", ""]
+            continue
+        lines.append(
+            f"`results={record['results']}` `reranked={record['reranked']}` "
+            f"`bm25={record['bm25_used']}`"
+        )
+        lines.append("")
+        for hit in record["hits"]:
+            paths = documents.get(hit["document_id"], {}).get("paths", ["?"])
+            rerank = "—" if hit["rerank"] is None else f"{hit['rerank']:.3f}"
+            legs = (f"vector #{hit['vector_rank']}" if hit["vector_rank"] else "vector —") + (
+                f" · bm25 #{hit['bm25_rank']}" if hit["bm25_rank"] else " · bm25 —"
+            )
+            lines += [
+                f"**{hit['rank']}. {hit['title']}** · `{hit['mime']}` · "
+                f"fused {hit['fused']:.4f} · rerank {rerank}",
+                f"  {legs} · fused #{hit['fused_rank']} → shown #{hit['rank']}",
+                f"  `{paths[0]}`"
+                + (f" (+{len(paths) - 1} more filings)" if len(paths) > 1 else ""),
+                f"  > {' '.join(hit['snippet'].split())}",
+                "",
+            ]
+        lines += ["---", ""]
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(lines), encoding="utf-8")
+    print(f"written to {out}")
 
 
 def taxonomy(annotations: Path, out: Path | None) -> None:
@@ -259,11 +238,14 @@ def main() -> None:
     build_cmd.add_argument("--traces", type=Path, required=True)
     build_cmd.add_argument("--out", type=Path, required=True)
     build_cmd.add_argument(
-        "--corpus-dir",
-        type=Path,
-        help="Indexed corpus. Embeds a searchable file list so the reviewer can "
-        "check whether an expected document exists at all.",
+        "--corpus-root",
+        help="Absolute corpus path for file:// links. Defaults to the one "
+        "recorded in the run metadata.",
     )
+
+    render_cmd = sub.add_parser("render", help="markdown dump of the traces")
+    render_cmd.add_argument("--traces", type=Path, required=True)
+    render_cmd.add_argument("--out", type=Path, required=True)
 
     tax_cmd = sub.add_parser("taxonomy", help="group exported notes into counts")
     tax_cmd.add_argument("--annotations", type=Path, required=True)
@@ -271,7 +253,9 @@ def main() -> None:
 
     args = parser.parse_args()
     if args.command == "build":
-        build(args.traces, args.out, args.corpus_dir)
+        build(args.traces, args.out, args.corpus_root)
+    elif args.command == "render":
+        render(args.traces, args.out)
     else:
         taxonomy(args.annotations, args.out)
 

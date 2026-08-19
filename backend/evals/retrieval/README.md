@@ -64,23 +64,59 @@ JINA_API_KEY=... MISTRAL_API_KEY=... \
 python evals/retrieval/local_trace.py \
     --corpus-dir /path/to/documents \
     --queries    /path/to/queries.txt \
-    --out        /path/to/run/traces.md \
+    --out        /path/to/run/traces.jsonl \
     --ocr --gotenberg-url http://localhost:3001 --tpm 80000
 ```
 
 Parsing, OCR and embeddings are cached by file content, so a second run over a
 mostly-unchanged directory costs minutes rather than hours.
 
+Three files come out:
+
+| File | Holds |
+|---|---|
+| `traces.jsonl` | one query per line: results **and** the intermediate rankings behind them |
+| `traces-run.json` | what is true of the whole run, plus the document-to-paths map |
+| `traces-manifest.jsonl` | what became of each corpus file — indexed, duplicate, failed, not-indexed |
+
+The manifest is what lets a reviewer tell a retrieval miss from a document that
+is not searchable yet. Those look identical in a result list and need opposite
+fixes.
+
+`not-indexed` means **no searchable text today**, not that the file cannot have
+any. It is mostly images and archives, and each row carries the reason and the
+issue tracking it. The product intent is that everything in the corpus is
+reachable by some means, so this status marks work outstanding rather than a
+decision that was made.
+
 ## 2. Build the review page
 
 ```
 python evals/retrieval/annotate.py build \
-    --traces /path/to/run/traces.md \
+    --traces /path/to/run/traces.jsonl \
     --out    /path/to/run/review.html
 ```
 
 A self-contained HTML file — data embedded, no server, no dependencies. Open it
 in a browser.
+
+Each result carries its provenance: `vector #20 · bm25 #2 · fused #10 → shown #1`
+says the keyword leg found it second, the semantic leg barely found it, fusion
+buried it tenth, and the reranker pulled it to the top. None of that is visible
+from the ranked list alone.
+
+For a readable dump without a browser:
+
+```
+python evals/retrieval/annotate.py render \
+    --traces /path/to/run/traces.jsonl \
+    --out    /path/to/run/traces.md
+```
+
+Markdown is a **view** of the traces, never a source for them. An earlier
+version had it the other way round, and the regular expressions that parsed it
+back silently dropped 28% of results the day rerank scores turned out to be
+signed.
 
 ## 3. Group what you wrote
 
