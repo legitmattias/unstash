@@ -164,62 +164,42 @@ def render(traces: Path, out: Path) -> None:
 
 
 def taxonomy(annotations: Path, out: Path | None) -> None:
-    """Group exported notes into a counted failure taxonomy.
+    """Group exported judgements into a counted failure taxonomy.
 
-    Grouping is by exact note text, which is why the page offers autocomplete:
-    consistent wording here is what makes the counts mean anything. Near
-    duplicates are listed together under a heading so they can be merged by
-    hand — the roadmap's advice is to hand-group the first several dozen rather
-    than trust an automatic clustering nobody has checked.
+    Grouping is by exact note text, which is why the page offers previous notes
+    as autocomplete: consistent wording is what makes the counts mean anything.
+    Synonyms are merged by hand afterwards — the grouping is the judgement, the
+    arithmetic is not.
     """
     rows = [
         json.loads(line)
         for line in annotations.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    coded = [r for r in rows if (r.get("note") or "").strip()]
-    if not coded:
-        sys.exit("no coded rows — nothing to group yet")
-
-    by_note = collections.Counter(r["note"].strip() for r in coded)
-    by_stage = collections.Counter(r.get("stage") or "unset" for r in coded)
-    relevant = sum(1 for r in rows if r.get("relevant"))
+    if not rows:
+        sys.exit("no rows in the export")
+    judged = [r for r in rows if r.get("note") or r.get("relevant") or r.get("expected_path")]
+    if not judged:
+        sys.exit("nothing judged yet")
 
     lines = [
         "# Failure taxonomy",
         "",
-        f"From {len(coded)} coded queries out of {len(rows)} reviewed.",
+        f"{len(judged)} judged of {len(rows)} reviewed.",
         "",
         "Counts are by exact note text. Merge synonymous notes by hand before "
-        "treating these as final — grouping is the judgement, not the arithmetic.",
+        "treating these as final.",
         "",
-        "## By note",
-        "",
-        f"| {'count':>5} | note |",
-        "|---:|---|",
     ]
-    lines += [f"| {count:>5} | {note} |" for note, count in by_note.most_common()]
+    lines += _note_table(judged)
+    lines += _stage_table(judged)
+    lines += _leg_contribution(rows)
     lines += [
-        "",
-        "## By stage (where it first went wrong)",
-        "",
-        f"| {'count':>5} | stage |",
-        "|---:|---|",
-    ]
-    lines += [f"| {count:>5} | {stage} |" for stage, count in by_stage.most_common()]
-    lines += [
-        "",
-        "## Relevance marks collected",
-        "",
-        f"{relevant} queries have at least one result marked relevant. Those are "
-        "(query, document) pairs usable as golden-set entries — the by-product of "
-        "having judged relevance while reading anyway.",
-        "",
         "## Prioritise by count times severity",
         "",
-        "The counts above say what is frequent. They do not say what is damaging. "
-        "A rare failure that returns a confident wrong answer outranks a common one "
-        "that returns nothing — rank the list by hand before deciding what to build.",
+        "These counts say what is *frequent*. They do not say what is *damaging*. "
+        "A rare confidently-wrong answer outranks a common empty result — rank the "
+        "list by hand before deciding what to build.",
     ]
     report = "\n".join(lines) + "\n"
     if out:
@@ -228,6 +208,108 @@ def taxonomy(annotations: Path, out: Path | None) -> None:
         print(f"written to {out}")
     else:
         print(report)
+
+
+def _note_table(judged: list[dict]) -> list[str]:
+    notes = collections.Counter(r["note"].strip() for r in judged if (r.get("note") or "").strip())
+    if not notes:
+        return ["## By note", "", "_No notes written._", ""]
+    return [
+        "## By note — the mechanism",
+        "",
+        "| count | note |",
+        "|---:|---|",
+        *[f"| {count} | {note} |" for note, count in notes.most_common()],
+        "",
+    ]
+
+
+def _stage_table(judged: list[dict]) -> list[str]:
+    stages = collections.Counter(r["stage"] for r in judged if r.get("stage"))
+    if not stages:
+        return [
+            "## By stage",
+            "",
+            "_No expected documents named, so no stage could be computed._ The stage "
+            "is derived from the trace once a reviewer says which document should "
+            "have won; without that it is not recoverable.",
+            "",
+        ]
+    return [
+        "## By stage — where it broke",
+        "",
+        "Computed from the trace, not judged by hand.",
+        "",
+        "| count | stage |",
+        "|---:|---|",
+        *[f"| {count} | {stage} |" for stage, count in stages.most_common()],
+        "",
+    ]
+
+
+def _leg_contribution(rows: list[dict]) -> list[str]:
+    """How often each retrieval leg actually supplied a relevant document.
+
+    Reciprocal rank fusion works on ranks alone, so a leg that returned nothing
+    relevant still contributes its top result at full strength. Per query that
+    is indistinguishable from a reranking failure; across a set it is
+    measurable, and it is the direct test of whether the keyword leg earns its
+    place on this corpus — the same question decompounding is meant to answer.
+    """
+    relevant_shown = 0
+    from_vector = from_bm25 = from_both = 0
+    queries_with_relevant = 0
+    bm25_contributed = 0
+    for row in rows:
+        marked = {m["path"] for m in row.get("relevant", [])}
+        if not marked:
+            continue
+        queries_with_relevant += 1
+        contributed = False
+        for hit in row.get("shown", []):
+            if hit["path"] not in marked:
+                continue
+            relevant_shown += 1
+            has_v, has_b = hit.get("vector_rank"), hit.get("bm25_rank")
+            if has_v and has_b:
+                from_both += 1
+            elif has_v:
+                from_vector += 1
+            elif has_b:
+                from_bm25 += 1
+            if has_b:
+                contributed = True
+        if contributed:
+            bm25_contributed += 1
+
+    if not relevant_shown:
+        return [
+            "## Leg contribution",
+            "",
+            "_No relevant results marked, so no contribution could be computed._",
+            "",
+        ]
+    share = f"{bm25_contributed}/{queries_with_relevant}"
+    return [
+        "## Leg contribution — is each leg earning its place?",
+        "",
+        f"Of {relevant_shown} relevant results marked across {queries_with_relevant} queries:",
+        "",
+        "| found by | count |",
+        "|---|---:|",
+        f"| both legs | {from_both} |",
+        f"| vector only | {from_vector} |",
+        f"| keyword only | {from_bm25} |",
+        "",
+        f"The keyword leg supplied at least one relevant result in **{share}** "
+        "queries that had any.",
+        "",
+        "A low number here is the argument for decompounding, and the reason to "
+        "re-examine the fusion weights: rank-based fusion cannot tell a leg that "
+        "found nothing from one that found the answer, so an unhelpful leg still "
+        "injects its top result at full strength.",
+        "",
+    ]
 
 
 def main() -> None:
