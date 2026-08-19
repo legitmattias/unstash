@@ -141,25 +141,34 @@ storage on every change.
 
 ## How to code a trace
 
-**Write what first went wrong, in your own words.** Not a category — the
-categories come afterwards, from what you wrote. The urge to start ticking boxes
-after the third trace is the thing to resist: once categories exist in your
-head, everything afterwards gets bent to fit them, and whatever does not fit
-lands in "other" and disappears.
+**Mark what is relevant.** `1`–`9` cycles a result through *answers the
+question* → *related but not an answer* → unmarked. Unmarked means judged
+irrelevant, so a query where nothing is marked is a complete judgement rather
+than a skipped one. Each mark is also a `(query, document)` pair the golden set
+can use — nearly free while reading, expensive to reconstruct later.
 
-**Record only the first failure.** Failures cascade. A document that was never
-indexed is also ranked wrongly and snippeted wrongly; writing down all three
-makes downstream symptoms dominate the counts, and you conclude that snippets
-are the problem when retrieval is. Find the earliest point where the system did
-something it should not have, write that, stop.
+**Write why, not where.** The note is for the *mechanism*: "matched a
+boilerplate footer", "compound split and matched a common word", "right
+document, snippet from the index page". Not a category — categories come
+afterwards, from what was written. The urge to start ticking boxes after the
+third trace is the thing to resist: once categories exist in your head,
+everything afterwards gets bent to fit them.
 
-**Leave the note blank when the results are fine.** A blank note is a data
-point, not a skipped row.
+**The stage is computed, not judged.** Name the document that should have won
+with `e`, and the tool derives where it fell out from the trace — not indexed,
+never retrieved, dropped at fusion, ranked too low, or shown with the wrong
+passage. Asking a reviewer to infer that from a ranked list was the original
+design error here; the ranked list cannot support it.
 
-**Mark relevant results as you go.** You are judging relevance anyway while
-reading. Each mark becomes a `(query, document)` pair the golden set can use —
-nearly free at the moment you are already looking, and expensive to reconstruct
-later.
+**Attribute to the stage whose purpose was violated.** For a *miss*, that is the
+earliest point the document fell out, because every later stage never had it.
+For a *false positive*, it is the reranker: the candidate pool is meant to
+contain irrelevant documents — retrieval casts wide for recall — and the
+reranker exists to demote them. Blaming the keyword leg for surfacing a lexical
+match would penalise a stage for doing its job.
+
+**Leave everything blank when the results are fine.** One keystroke and move on.
+Most queries should be this; the budget depends on it.
 
 **Stop when you stop learning.** The header tracks *distinct notes* and *since
 new* — queries since a note appeared that you had not written before. When that
