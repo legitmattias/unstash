@@ -31,6 +31,7 @@ jobs:
 
   # ── Build and push Docker images to GHCR ─────────────────
   build-and-push:
+    timeout-minutes: 20
     needs: ci
     runs-on: ubuntu-24.04
     permissions:
@@ -93,6 +94,7 @@ jobs:
 
   # ── Deploy to staging (auto on push to development) ──────
   deploy-staging:
+    timeout-minutes: 15
     needs: build-and-push
     runs-on: ubuntu-24.04
     environment: staging
@@ -152,6 +154,7 @@ jobs:
   # Runs after the staging deploy. No-ops cleanly until SMOKE_EMAIL /
   # SMOKE_PASSWORD are set as staging-environment secrets.
   e2e-staging:
+    timeout-minutes: 15
     needs: deploy-staging
     runs-on: ubuntu-24.04
     environment: staging
@@ -176,20 +179,35 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
 
+      - name: Install frontend dependencies
+        if: steps.creds.outputs.present == 'true'
+        working-directory: frontend
+        timeout-minutes: 5
+        run: pnpm install --frozen-lockfile
+
+      - name: Install the Playwright browser
+        if: steps.creds.outputs.present == 'true'
+        working-directory: frontend
+        timeout-minutes: 6
+        env:
+          # --with-deps runs apt-get; without this it can block on a prompt
+          # that no one is there to answer.
+          DEBIAN_FRONTEND: noninteractive
+        run: pnpm exec playwright install --with-deps chromium
+
       - name: Run e2e smoke against staging
         if: steps.creds.outputs.present == 'true'
         working-directory: frontend
+        timeout-minutes: 6
         env:
           SMOKE_BASE_URL: https://staging.unstash.mattic.dev
           SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
           SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm exec playwright install --with-deps chromium
-          pnpm e2e
+        run: pnpm e2e
 
   # ── Deploy to production (auto on push to main) ──────────
   deploy-production:
+    timeout-minutes: 15
     needs: build-and-push
     runs-on: ubuntu-24.04
     environment: production
