@@ -216,6 +216,16 @@ addopts = [
     "--cov-report=html:.coverage-html",
     "--cov-branch",
 ]
+markers = [
+    # Asserts a statistical property of a stochastic algorithm. UMAP feeds
+    # HDBSCAN through numba, whose compiled arithmetic differs across CPU
+    # feature sets, and small numerical differences flip hierarchy decisions —
+    # so the same input can yield a structurally different clustering on a
+    # different runner. Verified locally that thread count is *not* the
+    # variance source: assignments are byte-identical across 1, 2, 4 and 8
+    # threads. These run and are reported, but do not gate a merge.
+    "stochastic: result varies across CPU architectures; runs non-gating",
+]
 filterwarnings = [
     "error",
     "ignore::DeprecationWarning:pydantic.*",

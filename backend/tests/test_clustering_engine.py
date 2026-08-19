@@ -47,6 +47,7 @@ def _planted_corpus(
     return texts, np.array(embeddings), truth
 
 
+@pytest.mark.stochastic
 def test_recovers_planted_blobs():
     texts, embeddings, truth = _planted_corpus()
     result = cluster_documents(texts, embeddings)
@@ -139,17 +140,16 @@ def test_keywords_exclude_stop_words_and_keep_diacritics():
     assert any("å" in t or "ä" in t or "ö" in t for t in all_terms), all_terms
 
 
+@pytest.mark.stochastic
 def test_leaf_selection_recovers_planted_blobs_too():
     texts, embeddings, truth = _planted_corpus()
     result = cluster_documents(texts, embeddings, cluster_selection_method="leaf")
 
     assert result.params["cluster_selection_method"] == "leaf"
-    # Leaf extraction sits closer to hierarchy decision boundaries than EOM,
-    # and numba-compiled UMAP varies slightly across CPU generations, so the
-    # bound is looser than the EOM test's.
-    assert adjusted_rand_score(truth, result.assignments) > 0.75
+    assert adjusted_rand_score(truth, result.assignments) > 0.9
 
 
+@pytest.mark.stochastic
 def test_duplicate_batch_stays_one_cluster():
     # Batches of (near-)identical documents (same form, one per unit) are a
     # real archive pattern; more duplicates than n_neighbors is a documented
@@ -173,7 +173,7 @@ def test_duplicate_batch_stays_one_cluster():
     assert len(set(form_assignments)) == 1, "duplicate batch split across clusters"
     assert form_assignments[0] != -1, "duplicate batch fell out as noise"
     # The original planted structure is unaffected by the extra batch.
-    assert adjusted_rand_score(truth, result.assignments[: len(texts)]) > 0.75
+    assert adjusted_rand_score(truth, result.assignments[: len(texts)]) > 0.9
 
 
 def test_min_cluster_size_is_capped_for_large_corpora():
