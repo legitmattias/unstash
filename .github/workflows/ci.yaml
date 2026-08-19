@@ -94,7 +94,11 @@ jobs:
       - run: uv sync --frozen
 
       - name: Pytest
-        run: uv run pytest tests --ignore=tests/integration --cov-report=xml
+        # Stochastic tests are excluded from the gate, not weakened. Their
+        # result varies across CPU architectures, so a bound loose enough to
+        # survive that is loose enough to miss a real regression — the gate
+        # would keep its authority and lose its power.
+        run: uv run pytest tests --ignore=tests/integration -m "not stochastic" --cov-report=xml
 
       - name: Upload coverage
         if: github.event_name == 'pull_request'
@@ -276,6 +280,25 @@ jobs:
   # postgres with init-db.sh and runs adversarial RLS + migration roundtrip
   # tests against it.
   # ---------------------------------------------------------------------------
+  backend-stochastic-test:
+    name: Backend stochastic test (non-gating)
+    runs-on: ubuntu-latest
+    # Reports, never blocks. A red result here is a prompt to look, not a
+    # reason to stop a merge; the tests keep thresholds that mean something
+    # precisely because they are not gating.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install
+        working-directory: backend
+        run: uv sync --frozen
+      - name: Pytest (stochastic only)
+        working-directory: backend
+        run: uv run pytest tests --ignore=tests/integration -m stochastic -p no:cacheprovider
+
   backend-integration-test:
     name: Backend integration test
     runs-on: ubuntu-latest
@@ -312,6 +335,7 @@ jobs:
             docling-models-
 
       - name: Run integration tests
+        id: integration
         working-directory: backend
         env:
           # A leaked connection raises ResourceWarning from __del__, which
@@ -336,13 +360,27 @@ jobs:
           # withheld on PRs (test then skips).
           NER_API_KEY: ${{ github.event_name != 'pull_request' && secrets.NER_API_KEY || '' }}
           NER_ENDPOINT_URL: ${{ github.event_name != 'pull_request' && vars.NER_ENDPOINT_URL || '' }}
-        run: uv run pytest tests/integration --no-cov
+        run: |
+          set -o pipefail
+          uv run pytest tests/integration --no-cov 2>&1 | tee .pytest-report.txt
 
   # ---------------------------------------------------------------------------
   # Retrieval eval gate: deterministic nDCG regression check against a pinned
   # baseline. Fake embedder (no API), so it catches pipeline regressions
   # (BM25 / fusion / reduction) — embedding quality is the separate live tier.
   # ---------------------------------------------------------------------------
+      - name: Keep the failure report
+        # Two of the flaky failures on record can no longer be diagnosed
+        # because the run logs expired before anyone read them. An artifact
+        # outlives the log retention window.
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-failure-report
+          path: backend/.pytest-report.txt
+          retention-days: 30
+          if-no-files-found: ignore
+
   eval-gate:
     name: Retrieval eval gate
     runs-on: ubuntu-latest
