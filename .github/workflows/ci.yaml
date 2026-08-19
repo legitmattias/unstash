@@ -314,6 +314,12 @@ jobs:
       - name: Run integration tests
         working-directory: backend
         env:
+          # A leaked connection raises ResourceWarning from __del__, which
+          # reports the object but not where it came from. Without an
+          # allocation traceback the failure can only be re-run, not fixed —
+          # see the recurring unraisable-warning issue. Ten frames is enough
+          # to name the caller without the overhead of full-depth tracing.
+          PYTHONTRACEMALLOC: "10"
           # HF_TOKEN lifts the HuggingFace Hub anonymous rate limit so
           # parallel test runs downloading the tokenizer don't hit 429. A
           # free read token; kept on all runs to keep model downloads

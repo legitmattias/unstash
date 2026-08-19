@@ -14,6 +14,7 @@ its setup; for local runs, build with::
 
 from __future__ import annotations
 
+import gc
 import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -256,3 +257,22 @@ async def login(client: AsyncClient, email: str, password: str) -> None:
         data={"username": email, "password": password},
     )
     assert response.status_code == 204, response.text
+
+
+@pytest.fixture(autouse=True)
+def _collect_between_tests() -> Iterator[None]:
+    """Finalise garbage at the test boundary so leaks name their own test.
+
+    ``filterwarnings = ["error"]`` turns an unclosed asyncpg connection into a
+    failure, but a ``ResourceWarning`` is emitted by ``__del__`` — whenever the
+    collector happens to run. On a fast machine that is often never; on a slower
+    one it lands on whichever unrelated test was executing, which is how the
+    same leak has been attributed to three different tests and dismissed as
+    flakiness each time.
+
+    Collecting here does not fix a leak. It makes the leak land on the test that
+    caused it, which is the difference between a bug that can be fixed and one
+    that can only be re-run.
+    """
+    yield
+    gc.collect()
