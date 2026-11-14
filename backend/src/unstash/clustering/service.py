@@ -245,7 +245,7 @@ async def execute_clustering(
         async with org_context(org_id) as session:
             await session.execute(
                 update(ClusteringRun)
-                .where(ClusteringRun.id == run_id)
+                .where(ClusteringRun.id == run_id, ClusteringRun.org_id == org_id)
                 .values(status=ClusteringRunStatus.FAILED, error="engine failure"),
             )
         return None
@@ -320,7 +320,7 @@ async def _persist_outcome(
 
     await session.execute(
         update(ClusteringRun)
-        .where(ClusteringRun.id == run_id)
+        .where(ClusteringRun.id == run_id, ClusteringRun.org_id == org_id)
         .values(
             status=ClusteringRunStatus.SUCCEEDED,
             cluster_count=len(output.keywords),
@@ -386,7 +386,10 @@ async def _apply_llm_labels(
             if result is not None:
                 await session.execute(
                     update(Cluster)
-                    .where(Cluster.id == cluster_ids[engine_id])
+                    .where(
+                        Cluster.id == cluster_ids[engine_id],
+                        Cluster.org_id == org_id,
+                    )
                     .values(label=result.label, label_source=ClusterLabelSource.LLM),
                 )
             await record_llm_call(
