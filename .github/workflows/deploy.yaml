@@ -16,9 +16,9 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  API_IMAGE: ghcr.io/legitmattias/unstash-api
-  WEB_IMAGE: ghcr.io/legitmattias/unstash-web
-  POSTGRES_IMAGE: ghcr.io/legitmattias/unstash-postgres
+  API_IMAGE: ghcr.io/${{ github.repository_owner }}/unstash-api
+  WEB_IMAGE: ghcr.io/${{ github.repository_owner }}/unstash-web
+  POSTGRES_IMAGE: ghcr.io/${{ github.repository_owner }}/unstash-postgres
 
 jobs:
   # ── Gate: CI must pass before anything else runs ─────────
@@ -200,7 +200,7 @@ jobs:
         working-directory: frontend
         timeout-minutes: 6
         env:
-          SMOKE_BASE_URL: https://staging.unstash.mattic.dev
+          SMOKE_BASE_URL: ${{ vars.ORIGIN }}
           SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
           SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
         run: pnpm e2e

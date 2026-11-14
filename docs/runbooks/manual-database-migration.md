@@ -27,7 +27,7 @@ The commands below use `$COMPOSE` for the project and file arguments the deploy 
 COMPOSE="docker compose -p <project> -f compose.yaml -f compose.<environment>.yaml"
 ```
 
-Run them from a checkout of the repository at the deployed revision, with `SECRETS_DIR` and the other variables the compose files require set as the deploy workflow sets them.
+Run them from a checkout of the repository at the deployed revision, with the variables the compose files require set as the deploy workflow sets them: `SECRETS_DIR`, `ORIGIN`, `NER_ENDPOINT_URL`, and the image repositories `API_IMAGE`, `WEB_IMAGE` and `POSTGRES_IMAGE`. Compose stops with a message naming any that is missing.
 
 ### 1. Confirm the migrate service has the migration prerequisites
 

@@ -8,7 +8,7 @@
 
 services:
   api:
-    image: ${API_IMAGE:-ghcr.io/legitmattias/unstash-api}:${IMAGE_TAG:-staging}
+    image: ${API_IMAGE:?API_IMAGE must be set to the api image repository}:${IMAGE_TAG:-staging}
     ports:
       - "127.0.0.1:8010:8000"
     secrets:
@@ -32,7 +32,7 @@ services:
           cpus: "0.75"
 
   frontend:
-    image: ${WEB_IMAGE:-ghcr.io/legitmattias/unstash-web}:${IMAGE_TAG:-staging}
+    image: ${WEB_IMAGE:?WEB_IMAGE must be set to the web image repository}:${IMAGE_TAG:-staging}
     ports:
       - "127.0.0.1:3510:3000"
     environment:
@@ -48,7 +48,7 @@ services:
           cpus: "0.5"
 
   worker:
-    image: ${API_IMAGE:-ghcr.io/legitmattias/unstash-api}:${IMAGE_TAG:-staging}
+    image: ${API_IMAGE:?API_IMAGE must be set to the api image repository}:${IMAGE_TAG:-staging}
     secrets:
       - database_password
       - mistral_api_key
@@ -78,14 +78,14 @@ services:
           cpus: "1.0"
 
   migrate:
-    image: ${API_IMAGE:-ghcr.io/legitmattias/unstash-api}:${IMAGE_TAG:-staging}
+    image: ${API_IMAGE:?API_IMAGE must be set to the api image repository}:${IMAGE_TAG:-staging}
     secrets:
       - database_migrations_password
     environment:
       UNSTASH_ENVIRONMENT: staging
 
   postgres:
-    image: ${POSTGRES_IMAGE:-ghcr.io/legitmattias/unstash-postgres}:${IMAGE_TAG:-staging}
+    image: ${POSTGRES_IMAGE:?POSTGRES_IMAGE must be set to the postgres image repository}:${IMAGE_TAG:-staging}
     secrets:
       - database_password
       - database_migrations_password
