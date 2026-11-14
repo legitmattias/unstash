@@ -1,7 +1,7 @@
 # Reverse proxy site for one Unstash environment.
 #
 # Copy to /etc/caddy/sites/<environment>.caddy on the host and replace
-# UNSTASH_DOMAIN, API_PORT and WEB_PORT. The ports are the loopback ports the
+# UNSTASH_DOMAIN, ENVIRONMENT, API_PORT and WEB_PORT. The ports are the loopback ports the
 # environment's compose override publishes (`ports:` under api and frontend).
 #
 # The application derives the client address for rate limiting from the last
@@ -20,5 +20,12 @@ UNSTASH_DOMAIN {
 	# Frontend — everything else goes to the Next.js server.
 	handle {
 		reverse_proxy 127.0.0.1:WEB_PORT
+	}
+
+	log {
+		output file /var/log/caddy/ENVIRONMENT-access.log {
+			roll_size 20MiB
+			roll_keep 5
+		}
 	}
 }

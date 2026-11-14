@@ -106,6 +106,8 @@ fi
 # One site file per environment, added by the operator; the main file only
 # imports them. An empty directory is a valid configuration.
 install -d -m 0755 /etc/caddy/sites
+# Site files write their access logs here; the service runs as `caddy`.
+install -d -m 0750 -o caddy -g caddy /var/log/caddy
 caddyfile='import /etc/caddy/sites/*.caddy'
 if [[ "$(cat /etc/caddy/Caddyfile 2>/dev/null || true)" != "$caddyfile" ]]; then
     printf '%s\n' "$caddyfile" >/etc/caddy/Caddyfile

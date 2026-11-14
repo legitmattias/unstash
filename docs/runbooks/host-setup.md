@@ -88,8 +88,10 @@ Expect no output.
 For each environment, copy `docker/Caddyfile.snippet` to `/etc/caddy/sites/<environment>.caddy`, fill in the hostname and the two loopback ports from that environment's compose override, then:
 
 ```bash
-caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
+sudo -u caddy caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
 ```
+
+Validate as the `caddy` user, not as root. Validation opens the access log file, and a file created by root is unwritable for the service: the reload is then rejected and the previous configuration stays in effect.
 
 Caddy obtains a certificate the first time the hostname resolves to this host, so until DNS points here the site serves no valid certificate. That is expected.
 
