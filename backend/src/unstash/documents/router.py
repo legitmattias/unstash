@@ -52,7 +52,10 @@ async def _enforce_daily_upload_limit(ctx: OrgContext) -> None:
 
     day_start = datetime.combine(datetime.now(UTC).date(), time.min, tzinfo=UTC)
     uploads_today = await ctx.session.scalar(
-        select(func.count(Document.id)).where(Document.created_at >= day_start),
+        select(func.count(Document.id)).where(
+            Document.org_id == ctx.org_id,
+            Document.created_at >= day_start,
+        ),
     )
     if (uploads_today or 0) >= limit:
         raise HTTPException(
@@ -106,12 +109,13 @@ async def upload_document(
             detail=str(exc),
         ) from exc
 
-    # Dedup by content hash within the org (RLS scopes the query).
+    # Dedup by content hash within the org.
     # A previously failed document does not block a retry upload.
     existing = (
         await ctx.session.execute(
             select(Document)
             .where(
+                Document.org_id == ctx.org_id,
                 Document.content_hash == stored.sha256_hex,
                 Document.status != DocumentStatus.FAILED,
             )
@@ -172,10 +176,16 @@ async def list_documents(
 ) -> list[Document]:
     """List documents in this org, newest first.
 
-    RLS scopes the query to ``app.current_org_id`` automatically; the
-    handler only orders and paginates.
+    The query filters on the organisation explicitly; row-level security
+    applies the same restriction independently.
     """
-    stmt = select(Document).order_by(Document.created_at.desc()).limit(limit).offset(offset)
+    stmt = (
+        select(Document)
+        .where(Document.org_id == ctx.org_id)
+        .order_by(Document.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
     return list((await ctx.session.execute(stmt)).scalars())
 
 
@@ -188,7 +198,9 @@ async def get_document(
     document_id: Annotated[uuid.UUID, Path(...)],
 ) -> Document:
     """Return a single document by id, or 404 if not in this org."""
-    document = await ctx.session.get(Document, document_id)
+    document = await ctx.session.scalar(
+        select(Document).where(Document.id == document_id, Document.org_id == ctx.org_id),
+    )
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     return document
@@ -203,7 +215,9 @@ async def get_job(
     job_id: Annotated[uuid.UUID, Path(...)],
 ) -> JobProgress:
     """Return the current state of a background job."""
-    job = await ctx.session.get(JobProgress, job_id)
+    job = await ctx.session.scalar(
+        select(JobProgress).where(JobProgress.id == job_id, JobProgress.org_id == ctx.org_id),
+    )
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     return job
