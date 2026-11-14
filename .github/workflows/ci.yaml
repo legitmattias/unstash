@@ -154,6 +154,7 @@ jobs:
         env:
           ORIGIN: http://ci-validation.local
           SECRETS_DIR: /ci-validation/secrets
+          DOCUMENTS_DIR: /ci-validation/documents
           # Placeholder for the fail-fast guard in the compose files; this
           # step only renders and validates the config, it never connects.
           NER_ENDPOINT_URL: http://ci-validation.local
