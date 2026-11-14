@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy import func, select
 
 from unstash.clustering.schemas import (
@@ -20,6 +20,7 @@ from unstash.clustering.schemas import (
     ClusterSummary,
     ReclusterResponse,
 )
+from unstash.config import get_settings
 from unstash.db.models import (
     Cluster,
     ClusteringRun,
@@ -28,6 +29,7 @@ from unstash.db.models import (
     Document,
 )
 from unstash.orgs.dependencies import OrgContextDep
+from unstash.ratelimit import enforce_rate_limit
 
 clusters_router = APIRouter()
 
@@ -133,9 +135,18 @@ async def list_cluster_documents(
     response_model=ReclusterResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )
-async def recluster(ctx: OrgContextDep) -> ReclusterResponse:
+async def recluster(request: Request, ctx: OrgContextDep) -> ReclusterResponse:
     """Enqueue a manual clustering run for the org."""
     from unstash.tasks.cluster import cluster_org_documents  # noqa: PLC0415
+
+    settings = get_settings()
+    await enforce_rate_limit(
+        request,
+        f"recluster:{ctx.org_id}",
+        limit=settings.recluster_rate_limit_max_requests,
+        window_seconds=settings.recluster_rate_limit_window_seconds,
+        detail="Too many clustering runs requested. Try again later.",
+    )
 
     in_flight = await ctx.session.scalar(
         select(func.count())

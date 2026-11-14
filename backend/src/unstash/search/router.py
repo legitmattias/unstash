@@ -20,6 +20,7 @@ from unstash.config import get_settings
 from unstash.db.models import Document, SearchLog
 from unstash.documents.embedder import EmbeddingError, get_embedder
 from unstash.orgs.dependencies import CurrentUserDep, OrgContextDep
+from unstash.ratelimit import enforce_rate_limit
 from unstash.search.reranker import get_reranker
 from unstash.search.schemas import (
     ClickReport,
@@ -93,6 +94,13 @@ async def search(  # noqa: PLR0913 — query + optional filter params
 ) -> SearchResponse:
     """Run a hybrid search, optionally filtered by mime type, date range, and category."""
     settings = get_settings()
+    await enforce_rate_limit(
+        request,
+        f"search:{user.id}",
+        limit=settings.search_rate_limit_max_requests,
+        window_seconds=settings.search_rate_limit_window_seconds,
+        detail="Too many searches. Try again shortly.",
+    )
     filters = SearchFilters(
         mime_type=mime_type,
         date_from=date_from.isoformat() if date_from else None,

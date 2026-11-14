@@ -1,19 +1,25 @@
-# Caddy virtual host snippet for Unstash.
+# Reverse proxy virtual host for Unstash.
 #
-# Import this into your production Caddyfile. Assumes the Unstash Docker
-# Compose stack exposes api on port 8000 and frontend on port 3000 on
-# the host's loopback interface (127.0.0.1).
+# Import this into the host's Caddyfile. Assumes the compose stack publishes
+# the api and the frontend on the host's loopback interface. The ports differ
+# per environment — set them to match the `ports:` entries in the compose
+# override in use.
 #
-# Replace UNSTASH_DOMAIN with the actual production domain or subdomain.
+# Replace UNSTASH_DOMAIN, API_PORT and WEB_PORT.
+#
+# The application derives the client address for rate limiting from the last
+# X-Forwarded-For entry, so exactly one proxy must sit in front of it. Caddy
+# discards a client-supplied X-Forwarded-For unless `trusted_proxies` is
+# configured; leave it unset.
 
 UNSTASH_DOMAIN {
 	# API — all /api/* requests go to the FastAPI backend.
 	handle /api/* {
-		reverse_proxy 127.0.0.1:8000
+		reverse_proxy 127.0.0.1:API_PORT
 	}
 
-	# Frontend — everything else goes to the SvelteKit server.
+	# Frontend — everything else goes to the Next.js server.
 	handle {
-		reverse_proxy 127.0.0.1:3000
+		reverse_proxy 127.0.0.1:WEB_PORT
 	}
 }

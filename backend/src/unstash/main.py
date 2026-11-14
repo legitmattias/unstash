@@ -158,6 +158,38 @@ def create_app() -> FastAPI:
 
     _ = _rate_limit_login  # registered by decorator
 
+    is_production_like = settings.environment in ("production", "staging")
+
+    @app.middleware("http")
+    async def _security_headers(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        """Attach the baseline security headers to every API response.
+
+        The API serves JSON only, so its content policy forbids everything.
+        The policy is omitted in debug mode, where the interactive docs page
+        loads scripts and styles. HSTS is sent only where TLS is terminated
+        in front of the application.
+        """
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        if not settings.debug:
+            response.headers.setdefault(
+                "Content-Security-Policy",
+                "default-src 'none'; frame-ancestors 'none'",
+            )
+        if is_production_like:
+            response.headers.setdefault(
+                "Strict-Transport-Security",
+                "max-age=31536000; includeSubDomains",
+            )
+        return response
+
+    _ = _security_headers  # registered by decorator
+
     @app.get("/api/health")
     async def health() -> dict[str, str]:
         """Liveness probe — returns OK if the process is running.

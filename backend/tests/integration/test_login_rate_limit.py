@@ -25,18 +25,16 @@ _MAX_ATTEMPTS = 3
 
 
 class _FakeRedis:
-    """In-memory INCR/EXPIRE stand-in for the rate-limit store."""
+    """In-memory stand-in for the rate-limit store's atomic hit script."""
 
     def __init__(self) -> None:
         self.counts: dict[str, int] = {}
 
-    async def incr(self, name: str) -> int:
-        self.counts[name] = self.counts.get(name, 0) + 1
-        return self.counts[name]
-
-    async def expire(self, name: str, time: int) -> bool:
-        _ = name, time
-        return True
+    async def eval(self, script: str, numkeys: int, *keys_and_args: str | int) -> int:
+        _ = script, numkeys
+        key = str(keys_and_args[0])
+        self.counts[key] = self.counts.get(key, 0) + 1
+        return self.counts[key]
 
     async def aclose(self) -> None:
         return None
@@ -116,3 +114,23 @@ async def test_rate_limit_keys_on_forwarded_ip(client: AsyncClient) -> None:
         headers={"X-Forwarded-For": "10.0.0.2"},
     )
     assert fresh.status_code != 429
+
+
+async def test_client_supplied_forwarded_prefix_does_not_reset_the_budget(
+    client: AsyncClient,
+) -> None:
+    """Prepending addresses to X-Forwarded-For does not buy a fresh budget."""
+    creds = {"username": "nobody@example.com", "password": "wrong-password"}
+
+    for attempt in range(_MAX_ATTEMPTS):
+        await client.post(
+            "/api/auth/login",
+            data=creds,
+            headers={"X-Forwarded-For": f"192.0.2.{attempt}, 10.0.0.3"},
+        )
+    blocked = await client.post(
+        "/api/auth/login",
+        data=creds,
+        headers={"X-Forwarded-For": "192.0.2.200, 10.0.0.3"},
+    )
+    assert blocked.status_code == 429
