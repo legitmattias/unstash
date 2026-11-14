@@ -1,11 +1,8 @@
-# Reverse proxy virtual host for Unstash.
+# Reverse proxy site for one Unstash environment.
 #
-# Import this into the host's Caddyfile. Assumes the compose stack publishes
-# the api and the frontend on the host's loopback interface. The ports differ
-# per environment — set them to match the `ports:` entries in the compose
-# override in use.
-#
-# Replace UNSTASH_DOMAIN, API_PORT and WEB_PORT.
+# Copy to /etc/caddy/sites/<environment>.caddy on the host and replace
+# UNSTASH_DOMAIN, API_PORT and WEB_PORT. The ports are the loopback ports the
+# environment's compose override publishes (`ports:` under api and frontend).
 #
 # The application derives the client address for rate limiting from the last
 # X-Forwarded-For entry, so exactly one proxy must sit in front of it. Caddy
@@ -13,6 +10,8 @@
 # configured; leave it unset.
 
 UNSTASH_DOMAIN {
+	encode zstd gzip
+
 	# API — all /api/* requests go to the FastAPI backend.
 	handle /api/* {
 		reverse_proxy 127.0.0.1:API_PORT
