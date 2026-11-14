@@ -36,7 +36,6 @@ class StartupCheckError(RuntimeError):
 # then add it here.
 REQUIRED_SECRETS: tuple[str, ...] = (
     "database_password",
-    "database_migrations_password",
     "database_admin_password",
     "session_secret",
     "encryption_key",
@@ -109,20 +108,28 @@ def check_secrets_loadable(settings: Settings) -> None:
 
 
 async def check_not_superuser(conn: AsyncConnection) -> None:
-    """Confirm the application is not connected as a Postgres superuser.
+    """Confirm the application role is subject to Row-Level Security.
 
-    Superusers bypass Row-Level Security unconditionally; a superuser
-    application role would silently disable multi-tenant isolation.
+    Superusers and roles with ``BYPASSRLS`` skip every policy, so connecting
+    as either disables multi-tenant isolation without any query failing.
     """
-    result = await conn.execute(text("SELECT current_setting('is_superuser')"))
-    value = result.scalar_one()
-    # current_setting returns 'on' or 'off' as a string.
-    if value == "on":
+    result = await conn.execute(
+        text("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user"),
+    )
+    is_superuser, bypasses_rls = result.one()
+    if is_superuser:
         raise StartupCheckError(
             "Application is connected as a Postgres superuser. This bypasses "
             "Row-Level Security and breaks multi-tenant isolation. Check the "
             "DATABASE_USER setting and the role configuration in init-db.sh; "
             "the application role must have NOSUPERUSER."
+        )
+    if bypasses_rls:
+        raise StartupCheckError(
+            "Application is connected as a role with BYPASSRLS. This skips "
+            "Row-Level Security and breaks multi-tenant isolation. Check the "
+            "DATABASE_USER setting and the role configuration in init-db.sh; "
+            "the application role must have NOBYPASSRLS."
         )
 
     logger.info("startup_check_passed", check="not_superuser")
