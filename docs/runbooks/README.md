@@ -9,6 +9,7 @@ Runbooks are written during development when the relevant code is fresh, and upd
 Written:
 
 - `vps-maintenance.md` — shared VPS operations: tier upgrades, volume management, OS patching, reboots, common stuck states.
+- `host-setup.md` — preparing a fresh host: bootstrap script, secrets, proxy site, deploy settings, first deploy.
 - `manual-database-migration.md` — break-glass application of Alembic migrations by hand (the deploy workflow applies them automatically).
 - `document-ingestion.md` — ingestion failure modes and recovery: re-upload as the universal retry, OCR/conversion/embedding outages, stuck documents, rate limits.
 
