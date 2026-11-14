@@ -56,6 +56,24 @@ services:
     networks:
       - internal
 
+  migrate:
+    # One-shot schema migration, run before the application starts:
+    #   docker compose ... run --rm migrate
+    # The only service that mounts the schema-owner credential. Behind a
+    # profile so `up` never starts it.
+    profiles: ["migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      UNSTASH_DATABASE_HOST: postgres
+      UNSTASH_DATABASE_PORT: "5432"
+      UNSTASH_DATABASE_NAME: unstash
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    networks:
+      - internal
+
   postgres:
     image: postgres:17
     volumes:

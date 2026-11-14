@@ -12,7 +12,6 @@ services:
       - "127.0.0.1:8000:8000"
     secrets:
       - database_password
-      - database_migrations_password
       - database_admin_password
       - session_secret
       - encryption_key
@@ -51,10 +50,6 @@ services:
     image: ${API_IMAGE:-ghcr.io/legitmattias/unstash-api}:${IMAGE_TAG:-production}
     secrets:
       - database_password
-      - database_migrations_password
-      - database_admin_password
-      - session_secret
-      - encryption_key
       - mistral_api_key
       - jina_api_key
       - ner_api_key
@@ -79,6 +74,13 @@ services:
           # models needs ~2 GB resident. Headroom for parse buffers.
           memory: 2500M
           cpus: "1.0"
+
+  migrate:
+    image: ${API_IMAGE:-ghcr.io/legitmattias/unstash-api}:${IMAGE_TAG:-production}
+    secrets:
+      - database_migrations_password
+    environment:
+      UNSTASH_ENVIRONMENT: production
 
   postgres:
     image: ${POSTGRES_IMAGE:-ghcr.io/legitmattias/unstash-postgres}:${IMAGE_TAG:-production}

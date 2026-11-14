@@ -19,18 +19,26 @@ Apply pending Alembic migrations to a deployed database by hand. The deploy work
 
 ## Procedure
 
-The application database is upgraded by running Alembic inside the live api container. The runtime image contains `alembic.ini`, the migration scripts, and the dependencies; the container has the migrations role's password mounted at `/run/secrets/database_migrations_password`.
+The application database is upgraded by running Alembic in the one-shot `migrate` service. It uses the same runtime image as the api — `alembic.ini`, the migration scripts and the dependencies are in it — and it is the only service with the migrations role's password mounted, at `/run/secrets/database_migrations_password`. The api and worker containers do not hold that credential, so Alembic cannot be run from inside them.
 
-### 1. Confirm the container has the migration prerequisites
+The commands below use `$COMPOSE` for the project and file arguments the deploy workflow uses for the environment, for example:
 
 ```bash
-docker exec <project>-api-1 ls /run/secrets/
+COMPOSE="docker compose -p <project> -f compose.yaml -f compose.<environment>.yaml"
 ```
 
-Expect at minimum: `database_password`, `database_migrations_password`, `session_secret`, `encryption_key`. If `database_migrations_password` is missing, the compose file is misconfigured — fix the compose file and redeploy before continuing.
+Run them from a checkout of the repository at the deployed revision, with `SECRETS_DIR` and the other variables the compose files require set as the deploy workflow sets them.
+
+### 1. Confirm the migrate service has the migration prerequisites
 
 ```bash
-docker exec <project>-api-1 alembic --version
+$COMPOSE run --rm migrate ls /run/secrets/
+```
+
+Expect `database_migrations_password`. If it is missing, the compose file is misconfigured — fix the compose file before continuing.
+
+```bash
+$COMPOSE run --rm migrate alembic --version
 ```
 
 Should print the installed Alembic version. If the binary isn't found, the runtime image is missing the migration tooling — fix the Dockerfile and rebuild before continuing.
@@ -82,13 +90,13 @@ Alembic's `--sql` mode generates *static* SQL — it does not consult the databa
 To inspect just the SQL that would actually run, supply an explicit range `<from>:head`, where `<from>` is the current revision shown in step 5 below (or `base` for an empty database):
 
 ```bash
-docker exec <project>-api-1 alembic upgrade <current-revision>:head --sql | less
+$COMPOSE run --rm migrate alembic upgrade <current-revision>:head --sql | less
 ```
 
 If you don't yet know the current revision, the static form is still useful — just scroll to the bottom for the incremental tail:
 
 ```bash
-docker exec <project>-api-1 alembic upgrade head --sql | less
+$COMPOSE run --rm migrate alembic upgrade head --sql | less
 ```
 
 Either way, expect `CREATE TABLE`, `CREATE INDEX`, `ALTER TABLE`, `INSERT INTO alembic_version` for each pending migration. If anything looks unexpected — a `DROP TABLE` you did not author, an `ALTER` that suggests data loss — stop and investigate before applying.
@@ -96,7 +104,7 @@ Either way, expect `CREATE TABLE`, `CREATE INDEX`, `ALTER TABLE`, `INSERT INTO a
 ### 5. Check the current revision
 
 ```bash
-docker exec <project>-api-1 alembic current
+$COMPOSE run --rm migrate alembic current
 ```
 
 Note the revision (or empty result, meaning base). This is the target if you need to downgrade.
@@ -104,7 +112,7 @@ Note the revision (or empty result, meaning base). This is the target if you nee
 ### 6. Apply the upgrade
 
 ```bash
-docker exec <project>-api-1 alembic upgrade head
+$COMPOSE run --rm migrate alembic upgrade head
 ```
 
 Each migration runs in its own transaction. A failure mid-way rolls back that specific migration cleanly; previously-applied migrations remain applied.
@@ -112,7 +120,7 @@ Each migration runs in its own transaction. A failure mid-way rolls back that sp
 ### 7. Verify
 
 ```bash
-docker exec <project>-api-1 alembic current
+$COMPOSE run --rm migrate alembic current
 ```
 
 Should show the new head revision with `(head)`.
@@ -146,7 +154,7 @@ The procedure is verified when all four hold:
 If a migration fails partway through and you need to undo what did apply:
 
 ```bash
-docker exec <project>-api-1 alembic downgrade <previous-revision>
+$COMPOSE run --rm migrate alembic downgrade <previous-revision>
 ```
 
 If the migration chain is corrupt (mismatched expectations), restore the backup from step 2:

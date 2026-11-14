@@ -45,18 +45,18 @@ def test_check_secrets_loadable_passes_when_all_present() -> None:
 
 def test_check_secrets_loadable_raises_when_one_missing() -> None:
     overrides = {name: f"value-for-{name}" for name in REQUIRED_SECRETS}
-    overrides["database_migrations_password"] = ""
+    overrides["database_admin_password"] = ""
     settings = Settings(**overrides)
 
     with pytest.raises(StartupCheckError) as exc_info:
         check_secrets_loadable(settings)
 
     message = str(exc_info.value)
-    assert "database_migrations_password" in message
+    assert "database_admin_password" in message
     assert "/run/secrets/" in message
     # Other secrets should not appear in the failure message.
     assert "database_password" not in message.replace(
-        "database_migrations_password",
+        "database_admin_password",
         "",
     )
 
@@ -80,22 +80,22 @@ def test_check_secrets_loadable_lists_all_missing_secrets() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _mock_conn_returning(value: str) -> AsyncMock:
-    """Build a mock AsyncConnection that returns ``value`` from execute().scalar_one()."""
+def _mock_conn_with_role(*, is_superuser: bool, bypasses_rls: bool) -> AsyncMock:
+    """Build a mock AsyncConnection whose role lookup returns the given attributes."""
     conn = AsyncMock()
     result = MagicMock()
-    result.scalar_one.return_value = value
+    result.one.return_value = (is_superuser, bypasses_rls)
     conn.execute = AsyncMock(return_value=result)
     return conn
 
 
-async def test_check_not_superuser_passes_when_off() -> None:
-    conn = _mock_conn_returning("off")
+async def test_check_not_superuser_passes_for_rls_enforced_role() -> None:
+    conn = _mock_conn_with_role(is_superuser=False, bypasses_rls=False)
     await check_not_superuser(conn)
 
 
-async def test_check_not_superuser_raises_when_on() -> None:
-    conn = _mock_conn_returning("on")
+async def test_check_not_superuser_raises_for_superuser() -> None:
+    conn = _mock_conn_with_role(is_superuser=True, bypasses_rls=False)
 
     with pytest.raises(StartupCheckError) as exc_info:
         await check_not_superuser(conn)
@@ -103,6 +103,15 @@ async def test_check_not_superuser_raises_when_on() -> None:
     message = str(exc_info.value)
     assert "superuser" in message.lower()
     assert "NOSUPERUSER" in message
+
+
+async def test_check_not_superuser_raises_for_bypassrls_role() -> None:
+    conn = _mock_conn_with_role(is_superuser=False, bypasses_rls=True)
+
+    with pytest.raises(StartupCheckError) as exc_info:
+        await check_not_superuser(conn)
+
+    assert "BYPASSRLS" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------
