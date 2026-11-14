@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi_users.exceptions import InvalidPasswordException, UserAlreadyExists
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
@@ -78,8 +78,8 @@ async def create_user(
 async def list_users(
     session: AdminSessionDep,
     _superuser: SuperuserDep,
-    limit: int = 50,
-    offset: int = 0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[User]:
     """List users in stable id order."""
     stmt = select(User).order_by(User.id).limit(limit).offset(offset)
