@@ -23,7 +23,7 @@ services:
       UNSTASH_DEBUG: "false"
       UNSTASH_LOG_LEVEL: DEBUG
     volumes:
-      - /mnt/unstash-data-staging/documents:/var/unstash/documents
+      - ${DOCUMENTS_DIR:?DOCUMENTS_DIR must be the host directory holding uploaded documents}:/var/unstash/documents
     restart: unless-stopped
     deploy:
       resources:
@@ -63,7 +63,7 @@ services:
       UNSTASH_DEBUG: "false"
       UNSTASH_LOG_LEVEL: DEBUG
     volumes:
-      - /mnt/unstash-data-staging/documents:/var/unstash/documents
+      - ${DOCUMENTS_DIR:?DOCUMENTS_DIR must be the host directory holding uploaded documents}:/var/unstash/documents
       # HuggingFace + Docling model cache (~3 GB after first parse).
       # Named volume so the download survives container recreates.
       - worker_model_cache:/home/unstash/.cache

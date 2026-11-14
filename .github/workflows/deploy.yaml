@@ -124,6 +124,7 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
           ORIGIN: ${{ vars.ORIGIN }}
           SECRETS_DIR: ${{ vars.SECRETS_DIR }}
+          DOCUMENTS_DIR: ${{ vars.DOCUMENTS_DIR }}
           NER_ENDPOINT_URL: ${{ vars.NER_ENDPOINT_URL }}
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -237,6 +238,7 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
           ORIGIN: ${{ vars.ORIGIN }}
           SECRETS_DIR: ${{ vars.SECRETS_DIR }}
+          DOCUMENTS_DIR: ${{ vars.DOCUMENTS_DIR }}
           NER_ENDPOINT_URL: ${{ vars.NER_ENDPOINT_URL }}
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
