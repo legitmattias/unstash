@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 license = { text = "UNLICENSED" }
 authors = [
-    { name = "legitmattias" },
+    { name = "Unstash contributors" },
 ]
 keywords = ["search", "document", "rag", "semantic-search", "hybrid-search"]
 classifiers = [
