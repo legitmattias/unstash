@@ -102,6 +102,16 @@ class Settings(BaseSettings):
     login_rate_limit_max_attempts: int = Field(default=10, gt=0)
     login_rate_limit_window_seconds: int = Field(default=60, gt=0)
 
+    # Search embeds the query and reranks through external providers on
+    # every call; a clustering run loads every embedding for the org. Both
+    # are throttled so one account cannot run up provider cost or pin the
+    # worker. Search is keyed by user, clustering by organisation.
+
+    search_rate_limit_max_requests: int = Field(default=60, gt=0)
+    search_rate_limit_window_seconds: int = Field(default=60, gt=0)
+    recluster_rate_limit_max_requests: int = Field(default=6, gt=0)
+    recluster_rate_limit_window_seconds: int = Field(default=3600, gt=0)
+
     # -- Document ingestion ----------------------------------------------------
     # The on-disk root for uploaded documents. In containers this is
     # bind-mounted from the per-environment data volume; locally it
