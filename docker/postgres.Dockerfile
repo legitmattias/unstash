@@ -48,3 +48,13 @@ RUN set -eux; \
 # ---------------------------------------------------------------------------
 COPY docker/init-db.sh /docker-entrypoint-initdb.d/01-init-app-user.sh
 RUN chmod +x /docker-entrypoint-initdb.d/01-init-app-user.sh
+
+# ---------------------------------------------------------------------------
+# Entrypoint wrapper — makes the role password secrets readable by the
+# `postgres` user before the stock entrypoint runs the init script.
+# ---------------------------------------------------------------------------
+COPY docker/postgres-entrypoint.sh /usr/local/bin/unstash-postgres-entrypoint.sh
+RUN chmod +x /usr/local/bin/unstash-postgres-entrypoint.sh
+ENTRYPOINT ["unstash-postgres-entrypoint.sh"]
+# Setting ENTRYPOINT clears the base image's CMD.
+CMD ["postgres"]

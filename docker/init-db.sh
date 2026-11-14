@@ -8,12 +8,17 @@ set -euo pipefail
 #                         cross-tenant admin endpoints (no DDL — only Alembic
 #                         owns the schema)
 #
-# Passwords are read from either:
+# Passwords are read from, in order:
 #   - Environment variables: UNSTASH_APP_DB_PASSWORD, UNSTASH_MIGRATIONS_DB_PASSWORD,
 #                            UNSTASH_ADMIN_DB_PASSWORD
-#   - Docker Compose secrets: /run/secrets/database_password
-#                             /run/secrets/database_migrations_password
-#                             /run/secrets/database_admin_password
+#   - The copies postgres-entrypoint.sh places in /dev/shm/unstash-db-secrets
+#   - Docker Compose secrets directly: /run/secrets/database_password,
+#     /run/secrets/database_migrations_password, /run/secrets/database_admin_password
+#
+# This script runs as the `postgres` user. A failure here leaves an
+# initialised data directory without the application roles, and the stock
+# entrypoint skips init scripts on every later start, so each failure path
+# names its cause.
 
 read_password() {
     local env_var="$1"
@@ -21,10 +26,19 @@ read_password() {
     local role_name="$3"
     local env_value="${!env_var:-}"
 
+    local staged_file
+    staged_file="/dev/shm/unstash-db-secrets/$(basename "$secret_file")"
+
     if [ -n "$env_value" ]; then
         printf '%s' "$env_value"
-    elif [ -f "$secret_file" ]; then
+    elif [ -r "$staged_file" ]; then
+        cat "$staged_file"
+    elif [ -r "$secret_file" ]; then
         cat "$secret_file"
+    elif [ -e "$secret_file" ]; then
+        echo "ERROR: ${secret_file} exists but is not readable by $(id -un) (uid $(id -u))." >&2
+        echo "Password for role '${role_name}' could not be read." >&2
+        exit 1
     else
         echo "ERROR: No password for role '${role_name}' available." >&2
         echo "Set ${env_var} or mount ${secret_file}." >&2

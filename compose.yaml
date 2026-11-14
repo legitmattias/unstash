@@ -79,7 +79,14 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U unstash_migrations -d unstash"]
+      # Healthy means the application role exists, not only that the server
+      # accepts connections: a first boot whose init script failed leaves a
+      # server that starts normally with no application roles.
+      test:
+        - CMD-SHELL
+        - >-
+          psql -U postgres -d unstash -Atc
+          "SELECT 1 FROM pg_roles WHERE rolname = 'unstash_app'" | grep -qx 1
       interval: 10s
       timeout: 5s
       retries: 5
