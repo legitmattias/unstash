@@ -128,7 +128,10 @@ async def get_org_context(
             ),
         )
 
-        membership_stmt = select(OrgMembership.id).where(OrgMembership.user_id == user.id)
+        membership_stmt = select(OrgMembership.id).where(
+            OrgMembership.user_id == user.id,
+            OrgMembership.org_id == org_id,
+        )
         if (await session.execute(membership_stmt)).scalar_one_or_none() is None:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

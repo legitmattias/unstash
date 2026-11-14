@@ -161,14 +161,14 @@ class SearchFilters:
 
 
 # The date filter matches a document that carries at least one extracted
-# date within the range. document_metadata is org-scoped (RLS), and a
+# date within the range. A
 # partial ``YYYY-MM`` iso is treated as the first of the month so it can be
 # compared as a date.
 _DATE_FILTER = (
     " AND EXISTS ("
     "  SELECT 1 FROM document_metadata dm,"
     "  jsonb_array_elements(dm.dates) AS elem"
-    "  WHERE dm.document_id = d.id"
+    "  WHERE dm.document_id = d.id AND dm.org_id = d.org_id"
     "  AND (CASE WHEN length(elem->>'iso') = 10 THEN (elem->>'iso')::date"
     "            ELSE ((elem->>'iso') || '-01')::date END)"
     "  BETWEEN to_date(:date_from, 'YYYY-MM-DD') AND to_date(:date_to, 'YYYY-MM-DD'))"
@@ -206,8 +206,8 @@ def _vector_sql(filter_clause: str) -> TextClause:
     return text(
         "SELECT c.id AS chunk_id, c.text, c.document_id, d.title, d.mime_type,"  # noqa: S608
         " cl.label AS category_label"
-        " FROM chunks c JOIN documents d ON d.id = c.document_id"
-        " LEFT JOIN clusters cl ON cl.id = d.cluster_id"
+        " FROM chunks c JOIN documents d ON d.id = c.document_id AND d.org_id = c.org_id"
+        " LEFT JOIN clusters cl ON cl.id = d.cluster_id AND cl.org_id = d.org_id"
         " WHERE c.org_id = :org_id AND d.status = 'indexed' AND c.embedding IS NOT NULL"
         f"{filter_clause}"
         " ORDER BY c.embedding <=> CAST(:query_vec AS vector) LIMIT :pool",
@@ -219,8 +219,8 @@ def _bm25_sql(filter_clause: str) -> TextClause:
         "SELECT c.id AS chunk_id, c.text, c.document_id, d.title, d.mime_type,"  # noqa: S608
         " cl.label AS category_label,"
         " paradedb.score(c.id) AS score"
-        " FROM chunks c JOIN documents d ON d.id = c.document_id"
-        " LEFT JOIN clusters cl ON cl.id = d.cluster_id"
+        " FROM chunks c JOIN documents d ON d.id = c.document_id AND d.org_id = c.org_id"
+        " LEFT JOIN clusters cl ON cl.id = d.cluster_id AND cl.org_id = d.org_id"
         " WHERE c.org_id = :org_id AND d.status = 'indexed' AND c.text @@@ :query"
         f"{filter_clause}"
         " ORDER BY score DESC LIMIT :pool",

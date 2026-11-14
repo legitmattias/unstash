@@ -100,21 +100,34 @@ async def _fail_job(  # noqa: PLR0913 — the failure transition needs all of th
 
 async def _load_targets(
     session: AsyncSession,
+    org_id: uuid.UUID,
     document_id: uuid.UUID,
     job_id: uuid.UUID,
 ) -> tuple[Document | None, JobProgress | None]:
-    """Load the task's document + job rows, tolerating producer-commit lag."""
+    """Load the task's document + job rows, tolerating producer-commit lag.
+
+    Both lookups are restricted to ``org_id``: the ids arrive in the task
+    message, so a row belonging to another organisation is treated as absent.
+    """
+    document_stmt = select(Document).where(
+        Document.id == document_id,
+        Document.org_id == org_id,
+    )
+    job_stmt = select(JobProgress).where(
+        JobProgress.id == job_id,
+        JobProgress.org_id == org_id,
+    )
     document = None
     job = None
     for delay in _TARGET_RETRY_DELAYS:
-        document = await session.get(Document, document_id)
-        job = await session.get(JobProgress, job_id)
+        document = await session.scalar(document_stmt)
+        job = await session.scalar(job_stmt)
         if document is not None and job is not None:
             break
         await asyncio.sleep(delay)
     else:
-        document = await session.get(Document, document_id)
-        job = await session.get(JobProgress, job_id)
+        document = await session.scalar(document_stmt)
+        job = await session.scalar(job_stmt)
     return document, job
 
 
@@ -136,7 +149,7 @@ async def ingest_document(
 
     parsed_ok = False
     async with org_context(org_id) as session:
-        document, job = await _load_targets(session, document_id, job_id)
+        document, job = await _load_targets(session, org_id, document_id, job_id)
         if document is None or job is None:
             logger.warning(
                 "ingest_document_target_missing",
@@ -178,7 +191,10 @@ async def ingest_document(
 
         document.status = DocumentStatus.PARSED
         chunk_count = await session.scalar(
-            select(func.count(Chunk.id)).where(Chunk.document_id == document.id),
+            select(func.count(Chunk.id)).where(
+                Chunk.org_id == org_id,
+                Chunk.document_id == document.id,
+            ),
         )
         logger.info(
             "ingest_parse_completed",
@@ -220,7 +236,7 @@ async def embed_document(
 
     trigger = None
     async with org_context(org_id) as session:
-        document, job = await _load_targets(session, document_id, job_id)
+        document, job = await _load_targets(session, org_id, document_id, job_id)
         if document is None or job is None:
             logger.warning(
                 "embed_document_target_missing",
@@ -235,7 +251,11 @@ async def embed_document(
         started = datetime.now(UTC)
         result = await session.execute(
             select(Chunk)
-            .where(Chunk.document_id == document.id, Chunk.embedding.is_(None))
+            .where(
+                Chunk.org_id == org_id,
+                Chunk.document_id == document.id,
+                Chunk.embedding.is_(None),
+            )
             .order_by(Chunk.chunk_index),
         )
         pending = list(result.scalars())
