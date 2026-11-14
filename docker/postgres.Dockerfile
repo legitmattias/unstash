@@ -5,9 +5,10 @@
 # Bakes in the database initialization script that creates the Unstash roles.
 #
 # All versions are pinned for reproducibility — bump deliberately.
-# pgvector must stay >= 0.8.2 (CVE-2026-3172).
+# pgvector must stay >= 0.8.7: earlier releases have buffer overflows in
+# parallel HNSW and IVFFlat index builds.
 
-FROM pgvector/pgvector:0.8.2-pg17
+FROM pgvector/pgvector:0.8.7-pg17
 
 ARG PG_MAJOR=17
 ARG PGVECTORSCALE_VERSION=0.9.0
