@@ -115,7 +115,7 @@ Run the deploy workflow for the environment. It pulls the images, applies migrat
 ssh deploy@$HOST 'curl -sf http://127.0.0.1:<api-port>/api/ready'
 ```
 
-If data is being carried over from another host, restore it now (database dump, then the documents directory), before moving DNS.
+If data is being carried over from another host, restore it now, before moving DNS — see `restore-from-backup.md`.
 
 Point the environment's DNS record at the host. Caddy obtains the certificate on the first request.
 

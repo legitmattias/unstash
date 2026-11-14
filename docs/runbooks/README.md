@@ -10,6 +10,7 @@ Written:
 
 - `vps-maintenance.md` — shared VPS operations: tier upgrades, volume management, OS patching, reboots, common stuck states.
 - `host-setup.md` — preparing a fresh host: bootstrap script, secrets, proxy site, deploy settings, first deploy.
+- `restore-from-backup.md` — restoring a database from a nightly dump and its documents, on the same host or a new one; expected errors and what to verify.
 - `manual-database-migration.md` — break-glass application of Alembic migrations by hand (the deploy workflow applies them automatically).
 - `document-ingestion.md` — ingestion failure modes and recovery: re-upload as the universal retry, OCR/conversion/embedding outages, stuck documents, rate limits.
 
@@ -17,7 +18,6 @@ Planned (added as the relevant components are implemented):
 
 - `deploy.md` — deployment procedure
 - `rollback.md` — rolling back a deployment
-- `restore-from-backup.md` — PostgreSQL point-in-time restore
 - `rotate-secrets.md` — secret rotation procedures
 - `investigate-failed-sync.md` — debugging connector sync failures
 - `search-quality-debugging.md` — debugging poor search results
