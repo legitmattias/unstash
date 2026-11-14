@@ -40,7 +40,7 @@ _CHUNK_TARGET_TOKENS = 500
 # when the parser, the chunker, or the chunking parameters change in a
 # way that should invalidate downstream artefacts (PII redaction,
 # eval golden sets, etc.).
-PIPELINE_VERSION = "docling@2.81 chunker=hybrid tokenizer=miniLM-L6-v2 v1"
+PIPELINE_VERSION = "docling@2.150 chunker=hybrid tokenizer=miniLM-L6-v2 v1"
 
 
 @dataclass(frozen=True, slots=True)
