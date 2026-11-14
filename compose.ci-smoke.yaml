@@ -13,7 +13,7 @@
 # check fails against an unmigrated database):
 #   SECRETS_DIR=/tmp/secrets docker compose \
 #     -f compose.yaml -f compose.ci-smoke.yaml \
-#     -p unstash-ci-smoke run --rm api alembic upgrade head
+#     -p unstash-ci-smoke run --rm migrate
 #   SECRETS_DIR=/tmp/secrets docker compose \
 #     -f compose.yaml -f compose.ci-smoke.yaml \
 #     -p unstash-ci-smoke up -d api
@@ -30,7 +30,6 @@ services:
     image: unstash-api:ci
     secrets:
       - database_password
-      - database_migrations_password
       - database_admin_password
       - session_secret
       - encryption_key
@@ -45,10 +44,6 @@ services:
     image: unstash-api:ci
     secrets:
       - database_password
-      - database_migrations_password
-      - database_admin_password
-      - session_secret
-      - encryption_key
     environment:
       UNSTASH_ENVIRONMENT: ci
       UNSTASH_DEBUG: "false"
@@ -57,6 +52,13 @@ services:
       - documents:/var/unstash/documents
       - worker_model_cache:/home/unstash/.cache
     command: ["taskiq", "worker", "unstash.tasks:broker"]
+
+  migrate:
+    image: unstash-api:ci
+    secrets:
+      - database_migrations_password
+    environment:
+      UNSTASH_ENVIRONMENT: ci
 
   postgres:
     image: unstash-postgres:ci

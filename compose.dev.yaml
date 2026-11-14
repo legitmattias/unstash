@@ -17,7 +17,6 @@ services:
       - "127.0.0.1:8100:8000"
     secrets:
       - database_password
-      - database_migrations_password
       - database_admin_password
       - session_secret
       - encryption_key
@@ -55,10 +54,6 @@ services:
       - worker_model_cache:/home/unstash/.cache
     secrets:
       - database_password
-      - database_migrations_password
-      - database_admin_password
-      - session_secret
-      - encryption_key
       - mistral_api_key
       - jina_api_key
     environment:
@@ -66,6 +61,20 @@ services:
       UNSTASH_DEBUG: "true"
       UNSTASH_LOG_LEVEL: DEBUG
     command: ["uv", "run", "taskiq", "worker", "unstash.tasks:broker", "--reload"]
+
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      target: dev
+    volumes:
+      - ./backend/alembic:/app/alembic:ro
+      - ./backend/alembic.ini:/app/alembic.ini:ro
+    secrets:
+      - database_migrations_password
+    environment:
+      UNSTASH_ENVIRONMENT: development
+    command: ["uv", "run", "alembic", "upgrade", "head"]
 
   postgres:
     build:

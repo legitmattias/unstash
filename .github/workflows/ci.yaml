@@ -201,7 +201,7 @@ jobs:
           docker compose \
             -f compose.yaml -f compose.ci-smoke.yaml \
             -p unstash-ci-smoke \
-            run --rm api alembic upgrade head
+            run --rm migrate
 
       - name: Bring up api
         run: |
@@ -234,7 +234,7 @@ jobs:
           output=$(docker compose \
             -f compose.yaml -f compose.ci-smoke.yaml \
             -p unstash-ci-smoke \
-            exec -T api alembic current)
+            run --rm migrate alembic current)
           echo "$output"
           if ! echo "$output" | grep -q '(head)'; then
             echo "::error::alembic current does not show (head)"
