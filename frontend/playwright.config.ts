@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// Runs against a deployed environment (staging by default). Point SMOKE_BASE_URL
-// elsewhere for local runs. Credentials come from SMOKE_EMAIL / SMOKE_PASSWORD;
+// Runs against the environment named by SMOKE_BASE_URL, falling back to a local
+// dev server. Credentials come from SMOKE_EMAIL / SMOKE_PASSWORD;
 // the spec skips when they are absent so the suite is safe to run unconfigured.
 export default defineConfig({
   testDir: "./e2e",
@@ -9,7 +9,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? "github" : "line",
   use: {
-    baseURL: process.env.SMOKE_BASE_URL ?? "https://staging.unstash.mattic.dev",
+    baseURL: process.env.SMOKE_BASE_URL ?? "http://localhost:3000",
     trace: "on-first-retry",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
