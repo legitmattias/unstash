@@ -86,7 +86,7 @@ services:
     # for the worker's CONVERT_THEN_EXTRACT path. No Chromium (we don't
     # render HTML), so ~38% smaller than the full image. Pinned because
     # the bundled LibreOffice moves fast.
-    image: gotenberg/gotenberg:8.34.0-libreoffice
+    image: gotenberg/gotenberg:8.40.0-libreoffice
     # Internal network only, never published. The conversion API runs
     # LibreOffice on uploaded bytes, so it must not be reachable from
     # outside the compose network.
