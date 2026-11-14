@@ -36,7 +36,7 @@ dependencies = [
     "aiofiles>=24.1.0",
     "python-multipart>=0.0.20",
     "python-magic>=0.4.27",
-    "docling>=2.81.0",
+    "docling>=2.150.1",
     "transformers>=4.45.0",
     # Direct deps so tool.uv.sources can pin them to the CPU-only index
     # (sources apply only to declared dependencies).
@@ -45,7 +45,7 @@ dependencies = [
     "bertopic>=0.17.4",
     "numpy>=2.0",
     "scikit-learn>=1.6",
-    "litellm==1.93.0",
+    "litellm==1.108.5",
     "stopwordsiso>=0.7.1",
 ]
 
