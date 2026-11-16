@@ -23,3 +23,18 @@ async def test_kb_bert_extracts_swedish_person_and_location() -> None:
     assert ("Anna Svensson", "person") in found
     assert ("Stockholm", "location") in found
     assert all(e.score >= _MIN_SCORE for e in entities)
+
+
+async def test_kb_bert_handles_text_beyond_the_model_window() -> None:
+    extractor = KbBertExtractor(
+        model="KBLab/bert-base-swedish-cased-ner",
+        min_score=_MIN_SCORE,
+    )
+    filler = "Styrelsen diskuterade ekonomin och underhållet av fastigheten under mötet. " * 120
+    entities = await extractor.extract(
+        filler + "Protokollet justerades av Erik Andersson i Uppsala."
+    )
+
+    found = {(e.text, e.label) for e in entities}
+    assert ("Erik Andersson", "person") in found
+    assert ("Uppsala", "location") in found

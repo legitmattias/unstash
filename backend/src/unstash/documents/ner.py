@@ -62,11 +62,29 @@ class _NerPipeline(Protocol):
     def __call__(self, text: str) -> list[dict[str, Any]]: ...
 
 
+# The token-classification models used are BERT-base: 512 positions.
+_MODEL_MAX_TOKENS = 512
+# Overlap between consecutive windows of a long text, so an entity cut
+# by one window boundary is whole in the next.
+_WINDOW_STRIDE_TOKENS = 64
+
+
 @lru_cache(maxsize=2)
 def _build_pipeline(model: str) -> _NerPipeline:
     """Build (or return cached) a transformers NER pipeline for ``model``."""
-    from transformers import pipeline  # noqa: PLC0415
+    from transformers import AutoTokenizer, pipeline  # noqa: PLC0415
 
+    # The pipeline splits long text into overlapping windows only when the
+    # tokenizer declares a maximum length, which not every model's
+    # tokenizer configuration does; without it, text beyond the limit
+    # raises inside the model.
+    tokenizer = cast(
+        "Any",
+        AutoTokenizer.from_pretrained(  # pyright: ignore[reportUnknownMemberType]
+            model,
+            model_max_length=_MODEL_MAX_TOKENS,
+        ),
+    )
     # transformers publishes no usable types for pipeline(); the runtime
     # call is covered by the real-model integration test.
     # aggregation_strategy glues sub-word tokens into whole-entity spans.
@@ -75,8 +93,9 @@ def _build_pipeline(model: str) -> _NerPipeline:
         pipeline(  # pyright: ignore[reportCallIssue, reportUnknownArgumentType]
             "ner",  # pyright: ignore[reportArgumentType]
             model=model,
-            tokenizer=model,
+            tokenizer=tokenizer,
             aggregation_strategy="first",
+            stride=_WINDOW_STRIDE_TOKENS,
         ),
     )
 
