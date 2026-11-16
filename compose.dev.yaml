@@ -62,6 +62,33 @@ services:
       UNSTASH_LOG_LEVEL: DEBUG
     command: ["uv", "run", "taskiq", "worker", "unstash.tasks:broker", "--reload"]
 
+  inference:
+    # Self-hosted embedding and reranking models. Behind a profile because
+    # it downloads ~4.5 GB of weights and holds ~5 GB of memory:
+    #   docker compose -f compose.yaml -f compose.dev.yaml --profile inference up
+    # then select it with UNSTASH_EMBEDDER_BACKEND=local and
+    # UNSTASH_RERANKER_BACKEND=local.
+    profiles: ["inference"]
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      target: dev
+    command: ["uv", "run", "uvicorn", "--factory", "unstash.inference_server.app:create_app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      HF_HOME: /home/unstash/.cache/huggingface
+      HF_HUB_DISABLE_TELEMETRY: "1"
+    volumes:
+      - ./backend/src:/app/src:ro
+      - inference_model_cache:/home/unstash/.cache
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      start_period: 900s
+      retries: 3
+    networks:
+      - internal
+
   migrate:
     build:
       context: .
@@ -99,6 +126,7 @@ services:
 volumes:
   documents:
   worker_model_cache:
+  inference_model_cache:
 
 secrets:
   database_password:

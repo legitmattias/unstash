@@ -244,3 +244,15 @@ def test_check_embedding_dimensions_rejects_mismatch() -> None:
     message = str(excinfo.value)
     assert str(EMBEDDING_DIM) in message
     assert str(EMBEDDING_DIM // 2) in message
+
+
+def test_check_embedding_dimensions_uses_the_selected_backend() -> None:
+    """The local backend's width is checked, not the hosted one's."""
+    settings = Settings(
+        **{name: f"value-for-{name}" for name in REQUIRED_SECRETS},
+        embedder_backend="local",
+        jina_embedding_dimensions=EMBEDDING_DIM,
+        inference_embedding_dimensions=EMBEDDING_DIM // 2,
+    )
+    with pytest.raises(StartupCheckError, match="'local' embedder"):
+        check_embedding_dimensions(settings)

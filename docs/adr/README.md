@@ -37,6 +37,7 @@ Each ADR follows Michael Nygard's structure:
 | [0012](./0012-evaluation-model-roles.md) | Evaluation Model Roles | Accepted |
 | [0013](./0013-clustering-method.md) | Clustering Method — HDBSCAN with Stable Extraction | Accepted (scope narrowed by ADR 0014) |
 | [0014](./0014-document-type-authored-not-discovered.md) | Document Type Is Authored and Supervised, Not Discovered by Clustering | Accepted |
+| [0015](./0015-self-hosted-inference-service.md) | Self-Hosted Embeddings and Reranking in a Separate Inference Service | Accepted |
 
 ## Creating a new ADR
 

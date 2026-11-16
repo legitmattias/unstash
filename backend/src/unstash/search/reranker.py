@@ -78,11 +78,19 @@ def get_reranker(
     *,
     http_client: httpx.AsyncClient | None = None,
 ) -> Reranker:
-    """Return the configured reranker: the fake when selected, else the provider."""
+    """Return the reranker selected by ``settings.reranker_backend``."""
     if settings.reranker_backend == "fake":
         return FakeReranker()
-    # Imported here: the provider module implements this module's
+    # Imported here: the provider modules implement this module's
     # interface, so a top-level import would be circular.
+    if settings.reranker_backend == "local":
+        from unstash.inference.local import LocalReranker  # noqa: PLC0415
+
+        return LocalReranker(
+            base_url=settings.inference_url,
+            timeout=settings.inference_rerank_timeout_seconds,
+            http_client=http_client,
+        )
     from unstash.inference.jina import JinaReranker  # noqa: PLC0415
 
     return JinaReranker(

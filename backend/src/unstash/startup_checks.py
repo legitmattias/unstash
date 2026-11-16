@@ -66,10 +66,10 @@ def check_embedding_dimensions(settings: Settings) -> None:
     # that do not otherwise need it.
     from unstash.db.models.chunk import EMBEDDING_DIM  # noqa: PLC0415
 
-    if settings.jina_embedding_dimensions != EMBEDDING_DIM:
+    if settings.embedding_dimensions != EMBEDDING_DIM:
         msg = (
-            f"Embedding width mismatch: jina_embedding_dimensions="
-            f"{settings.jina_embedding_dimensions} but chunks.embedding is "
+            f"Embedding width mismatch: the '{settings.embedder_backend}' embedder "
+            f"produces {settings.embedding_dimensions} dimensions but chunks.embedding is "
             f"{EMBEDDING_DIM}-dimensional. Changing the embedding width needs a "
             f"migration altering the column and a re-embed of every chunk — the "
             f"stored vectors are not portable across widths."
