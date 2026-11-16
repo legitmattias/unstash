@@ -45,10 +45,10 @@ from unstash.db.models.base import Base
 if TYPE_CHECKING:
     from unstash.db.models.document import Document
 
-# Jina v4 native embedding dimension. Matryoshka means a leading subset can be
-# indexed later (pgvectorscale `num_dimensions`) without re-embedding; the
-# full vector is stored regardless.
-EMBEDDING_DIM = 2048
+# Width of chunks.embedding. Every embedder backend must produce vectors of
+# this width; the application checks the selected backend against it at
+# startup. Changing it needs a migration and a re-embed of every chunk.
+EMBEDDING_DIM = 1024
 
 
 class Chunk(Base):

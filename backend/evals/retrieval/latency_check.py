@@ -28,11 +28,12 @@ import asyncpg
 from eval_db import fresh_database
 from run_eval import rank_bm25, rank_rrf, rank_vector
 
+from unstash.db.models.chunk import EMBEDDING_DIM
 from unstash.documents.embedder import EmbeddingTask, FakeEmbedder
 
 TARGET_CHUNKS = 10_000
 CHUNKS_PER_DOC = 20
-EMBED_DIM = 2048
+EMBED_DIM = EMBEDDING_DIM
 RRF_K = 20
 VECTOR_WEIGHT = 3.0
 ITERATIONS = 200
