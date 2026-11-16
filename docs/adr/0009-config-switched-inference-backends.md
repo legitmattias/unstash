@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted.
+Accepted. Amended by [ADR 0015](./0015-self-hosted-inference-service.md): the local backend for embeddings and reranking is a separate inference service.
 
 ## Context
 
