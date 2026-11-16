@@ -101,3 +101,71 @@ async def test_extensions_remain_after_roundtrip(
         assert required in present, (
             f"extension dropped during downgrade (should not happen): {required}"
         )
+
+
+async def test_embedding_width_migration_discards_vectors_and_resets_status(
+    migrations_pool: asyncpg.Pool,
+    settings_for_container: Settings,
+    backend_root: Path,
+) -> None:
+    """0020 narrows the column, empties it, and returns indexed documents to parsed."""
+    _ = settings_for_container
+    config = _alembic_config(backend_root)
+    old_vector = "[" + ",".join(["0.5"] * 2048) + "]"
+
+    command.downgrade(config, "0019_document_locations")
+    try:
+        async with migrations_pool.acquire() as conn:
+            org_id = await conn.fetchval(
+                "INSERT INTO organisations (slug, name) VALUES ('width', 'Width') RETURNING id",
+            )
+            with_chunks, without_chunks = [
+                await conn.fetchval(
+                    "INSERT INTO documents "
+                    "(org_id, title, source_uri, mime_type, size_bytes, content_hash, "
+                    "status, indexed_at) "
+                    "VALUES ($1, $2, $2, 'text/plain', 1, $2, 'indexed', now()) RETURNING id",
+                    org_id,
+                    title,
+                )
+                for title in ("with-chunks", "without-chunks")
+            ]
+            await conn.execute(
+                "INSERT INTO chunks (org_id, document_id, chunk_index, text, token_count, "
+                "char_offset_start, char_offset_end, embedding) "
+                "VALUES ($1, $2, 0, 'text', 1, 0, 4, $3::vector)",
+                org_id,
+                with_chunks,
+                old_vector,
+            )
+
+        command.upgrade(config, "head")
+
+        async with migrations_pool.acquire() as conn:
+            width = await conn.fetchval(
+                "SELECT atttypmod FROM pg_attribute "
+                "WHERE attrelid = 'chunks'::regclass AND attname = 'embedding'",
+            )
+            embedded = await conn.fetchval(
+                "SELECT count(*) FROM chunks WHERE embedding IS NOT NULL",
+            )
+            statuses = {
+                row["id"]: (row["status"], row["indexed_at"])
+                for row in await conn.fetch(
+                    "SELECT id, status, indexed_at FROM documents WHERE org_id = $1",
+                    org_id,
+                )
+            }
+            index_present = await conn.fetchval(
+                "SELECT count(*) FROM pg_indexes WHERE indexname = 'ix_chunks_embedding_diskann'",
+            )
+    finally:
+        command.upgrade(config, "head")
+        async with migrations_pool.acquire() as conn:
+            await conn.execute("DELETE FROM organisations WHERE slug = 'width'")
+
+    assert width == 1024
+    assert embedded == 0
+    assert statuses[with_chunks] == ("parsed", None)
+    assert statuses[without_chunks][0] == "indexed"
+    assert index_present == 1

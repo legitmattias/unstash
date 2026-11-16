@@ -155,7 +155,9 @@ class Settings(BaseSettings):
         description="Base URL of the Jina embeddings API.",
     )
     jina_embedding_model: str = Field(default="jina-embeddings-v4")
-    jina_embedding_dimensions: int = Field(default=2048, gt=0)
+    # The hosted model's native width is 2048; it is truncated (Matryoshka)
+    # to the column width.
+    jina_embedding_dimensions: int = Field(default=1024, gt=0)
     jina_timeout_seconds: float = Field(default=60.0, gt=0)
 
     # -- Self-hosted inference service ------------------------------------------

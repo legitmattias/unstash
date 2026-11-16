@@ -32,13 +32,14 @@ from unstash.db.models import (
     Document,
     LlmCall,
 )
+from unstash.db.models.chunk import EMBEDDING_DIM
 from unstash.db.session import get_sessionmaker
 from unstash.tasks import org_context
 
 if TYPE_CHECKING:
     import asyncpg
 
-_DIM = 2048
+_DIM = EMBEDDING_DIM
 _DOCS_PER_BLOB = 15
 
 _BLOB_TITLES = (
