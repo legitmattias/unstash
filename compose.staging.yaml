@@ -59,13 +59,13 @@ services:
       - database_password
       - mistral_api_key
       - jina_api_key
-      - ner_api_key
     environment:
       UNSTASH_ENVIRONMENT: staging
       UNSTASH_EMBEDDER_BACKEND: local
       UNSTASH_OCR_BACKEND: mistral
-      UNSTASH_NER_BACKEND: hf
-      UNSTASH_NER_ENDPOINT_URL: ${NER_ENDPOINT_URL:?NER_ENDPOINT_URL must be set when UNSTASH_NER_BACKEND=hf}
+      # Entity extraction runs in the worker; no document text leaves the
+      # host for it.
+      UNSTASH_NER_BACKEND: kb-bert
       UNSTASH_LABELER_BACKEND: hosted
       UNSTASH_DEBUG: "false"
       UNSTASH_LOG_LEVEL: DEBUG
@@ -82,10 +82,11 @@ services:
     deploy:
       resources:
         limits:
-          # One worker process loading Docling layout + tableformer
-          # models needs ~2 GB resident. Headroom for parse buffers.
-          memory: 2500M
-          cpus: "1.0"
+          # Docling's layout and table models take ~2 GB resident and the
+          # NER model ~0.5 GB; two concurrent parses of large documents
+          # peaked at 2.8 GB before the NER model was added.
+          memory: 5000M
+          cpus: "3.0"
 
   inference:
     # Self-hosted embedding and reranking models. Same image as api;
