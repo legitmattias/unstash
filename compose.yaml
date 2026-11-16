@@ -46,6 +46,10 @@ services:
         condition: service_healthy
       gotenberg:
         condition: service_healthy
+    # The image's health check probes the API's HTTP port, which the
+    # worker does not serve.
+    healthcheck:
+      disable: true
     environment:
       UNSTASH_DATABASE_HOST: postgres
       UNSTASH_DATABASE_PORT: "5432"
