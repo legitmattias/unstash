@@ -55,16 +55,17 @@ def load_golden() -> list[dict]:
 
 
 def build_embedder(kind: str):
+    from unstash.db.models.chunk import EMBEDDING_DIM
     from unstash.documents.embedder import FakeEmbedder
     from unstash.inference.jina import JinaEmbedder
 
     if kind == "fake":
-        return FakeEmbedder(dimensions=2048)
+        return FakeEmbedder(dimensions=EMBEDDING_DIM)
     return JinaEmbedder(
         api_key=os.environ["JINA_API_KEY"],
         base_url="https://api.jina.ai/v1",
         model="jina-embeddings-v4",
-        dimensions=2048,
+        dimensions=EMBEDDING_DIM,
         timeout=60.0,
     )
 
