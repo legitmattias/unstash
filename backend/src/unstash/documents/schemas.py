@@ -30,6 +30,23 @@ class DocumentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class DocumentLocationRead(BaseModel):
+    """One place a document was found at its source."""
+
+    kind: str
+    path: str
+    connector_id: uuid.UUID | None
+    source_modified_at: datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DocumentDetail(DocumentRead):
+    """A single document together with every location it was found at."""
+
+    locations: list[DocumentLocationRead]
+
+
 class JobProgressRead(BaseModel):
     """A background job's progress as visible to the API."""
 

@@ -428,3 +428,152 @@ async def test_daily_upload_limit_enforced(
 
     await _wait_terminal(app_client, "acme", first.json()["document_id"])
     await _wait_terminal(app_client, "acme", second.json()["document_id"])
+
+
+async def _locations(pool: asyncpg.Pool, document_id: str) -> list[tuple[str, object]]:
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT path, source_modified_at FROM document_locations "
+            "WHERE document_id = $1 ORDER BY path",
+            uuid.UUID(document_id),
+        )
+    return [(row["path"], row["source_modified_at"]) for row in rows]
+
+
+async def test_upload_records_source_path_as_location(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """A supplied source path is normalised, stored, and returned with the document."""
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
+
+    response = await app_client.post(
+        "/api/orgs/acme/documents",
+        files={"file": ("minutes.txt", b"minutes of the spring meeting\n", "text/plain")},
+        data={
+            "source_path": "\\Board\\2021\\minutes.txt",
+            "source_modified_at": "2021-05-04T10:15:00+02:00",
+        },
+    )
+    assert response.status_code == 201, response.text
+    document_id = response.json()["document_id"]
+
+    detail = await app_client.get(f"/api/orgs/acme/documents/{document_id}")
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["title"] == "minutes.txt"
+    assert [loc["path"] for loc in body["locations"]] == ["Board/2021/minutes.txt"]
+    assert body["locations"][0]["kind"] == "folder"
+    assert body["locations"][0]["source_modified_at"] == "2021-05-04T08:15:00Z"
+
+    # The source path never shapes the storage path.
+    stored = [p for p in get_settings().documents_root.rglob("*") if p.is_file()]
+    assert [p.name for p in stored] == ["minutes.txt"]
+    assert "Board" not in stored[0].parts
+
+    await _wait_terminal(app_client, "acme", document_id)
+
+
+async def test_upload_without_source_path_records_filename(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """With no source path the file name alone is the location."""
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
+
+    response = await app_client.post(
+        "/api/orgs/acme/documents",
+        files={"file": ("loose.txt", b"a file uploaded on its own\n", "text/plain")},
+    )
+    assert response.status_code == 201
+    document_id = response.json()["document_id"]
+
+    assert await _locations(migrations_pool, document_id) == [("loose.txt", None)]
+    await _wait_terminal(app_client, "acme", document_id)
+
+
+async def test_duplicate_upload_adds_location_to_existing_document(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """A copy filed elsewhere adds a location; repeating a path adds nothing."""
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
+
+    payload = b"one contract filed in two folders\n"
+
+    async def upload(path: str) -> dict[str, object]:
+        response = await app_client.post(
+            "/api/orgs/acme/documents",
+            files={"file": ("contract.txt", payload, "text/plain")},
+            data={"source_path": path},
+        )
+        assert response.status_code in {200, 201}, response.text
+        return response.json()
+
+    first = await upload("Contracts/contract.txt")
+    second = await upload("2021/Signed/contract.txt")
+    repeat = await upload("Contracts/contract.txt")
+
+    document_id = str(first["document_id"])
+    assert first["duplicate"] is False
+    assert second["duplicate"] is True
+    assert repeat["duplicate"] is True
+    assert second["document_id"] == repeat["document_id"] == document_id
+
+    assert [path for path, _ in await _locations(migrations_pool, document_id)] == [
+        "2021/Signed/contract.txt",
+        "Contracts/contract.txt",
+    ]
+    await _wait_terminal(app_client, "acme", document_id)
+
+
+@pytest.mark.parametrize("source_path", ["../outside.txt", "Board/../../outside.txt", "/"])
+async def test_invalid_source_path_is_rejected_before_storage(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+    source_path: str,
+) -> None:
+    """An unusable source path returns 422 and leaves nothing behind."""
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
+
+    response = await app_client.post(
+        "/api/orgs/acme/documents",
+        files={"file": ("outside.txt", b"rejected upload\n", "text/plain")},
+        data={"source_path": source_path},
+    )
+    assert response.status_code == 422
+
+    async with migrations_pool.acquire() as conn:
+        count = await conn.fetchval("SELECT count(*) FROM documents WHERE org_id = $1", acme_id)
+    assert count == 0
+    assert not any(get_settings().documents_root.rglob("*"))
+
+
+async def test_naive_source_modified_at_is_rejected(
+    app_client: AsyncClient,
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    """A modification time without a UTC offset is ambiguous and refused."""
+    user_a = await seed_user(migrations_pool, USER_A_EMAIL, USER_PASSWORD)
+    acme_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user_a, acme_id)
+    await login(app_client, USER_A_EMAIL, USER_PASSWORD)
+
+    response = await app_client.post(
+        "/api/orgs/acme/documents",
+        files={"file": ("naive.txt", b"naive timestamp\n", "text/plain")},
+        data={"source_modified_at": "2021-05-04T10:15:00"},
+    )
+    assert response.status_code == 422
