@@ -22,7 +22,7 @@ from unstash.documents.embedder import (
     FakeEmbedder,
     get_embedder,
 )
-from unstash.inference import jina as jina_module
+from unstash.inference import _http as http_module
 from unstash.inference.jina import JinaEmbedder
 
 Handler = Callable[[httpx.Request], httpx.Response]
@@ -42,7 +42,7 @@ def _install_transport(monkeypatch: pytest.MonkeyPatch, handler: Handler) -> Non
         kwargs["transport"] = httpx.MockTransport(handler)
         return real_client(*args, **kwargs)
 
-    monkeypatch.setattr(jina_module.httpx, "AsyncClient", factory)
+    monkeypatch.setattr(http_module.httpx, "AsyncClient", factory)
 
 
 # --- FakeEmbedder ----------------------------------------------------------
@@ -137,7 +137,7 @@ async def test_jina_empty_input_skips_the_call(
 
 
 async def test_jina_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(jina_module, "_backoff_seconds", _no_backoff)
+    monkeypatch.setattr(http_module, "_backoff_seconds", _no_backoff)
     calls = {"n": 0}
 
     def handler(_request: httpx.Request) -> httpx.Response:
@@ -172,7 +172,7 @@ async def test_jina_non_retryable_status_raises(
 async def test_jina_gives_up_after_max_retries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(jina_module, "_backoff_seconds", _no_backoff)
+    monkeypatch.setattr(http_module, "_backoff_seconds", _no_backoff)
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(429, text="rate limited")
