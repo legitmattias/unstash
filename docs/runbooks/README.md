@@ -11,6 +11,7 @@ Written:
 - `vps-maintenance.md` — shared VPS operations: tier upgrades, volume management, OS patching, reboots, common stuck states.
 - `host-setup.md` — preparing a fresh host: bootstrap script, secrets, proxy site, deploy settings, first deploy.
 - `restore-from-backup.md` — restoring a database from a nightly dump and its documents, on the same host or a new one; expected errors and what to verify.
+- `import-folder.md` — loading an existing folder of documents into an organisation with paths and modification times preserved.
 - `manual-database-migration.md` — break-glass application of Alembic migrations by hand (the deploy workflow applies them automatically).
 - `document-ingestion.md` — ingestion failure modes and recovery: re-upload as the universal retry, OCR/conversion/embedding outages, stuck documents, rate limits.
 
