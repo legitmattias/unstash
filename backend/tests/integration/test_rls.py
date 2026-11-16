@@ -28,6 +28,7 @@ TENANT_SCOPED_TABLES: tuple[str, ...] = (
     "clustering_runs",
     "clusters",
     "llm_calls",
+    "document_locations",
 )
 
 

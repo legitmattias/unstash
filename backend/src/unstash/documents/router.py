@@ -11,6 +11,7 @@ from typing import Annotated
 from fastapi import (
     APIRouter,
     File,
+    Form,
     HTTPException,
     Path,
     Query,
@@ -18,11 +19,26 @@ from fastapi import (
     UploadFile,
     status,
 )
+from pydantic import AwareDatetime  # noqa: TC002 — evaluated at runtime as a form parameter type
 from sqlalchemy import func, select
 
 from unstash.config import get_settings
-from unstash.db.models import Document, DocumentStatus, JobProgress, JobStatus, Organisation
+from unstash.db.models import (
+    Document,
+    DocumentLocation,
+    DocumentStatus,
+    JobProgress,
+    JobStatus,
+    Organisation,
+)
+from unstash.documents.locations import (
+    InvalidSourcePathError,
+    normalise_source_path,
+    record_location,
+)
 from unstash.documents.schemas import (
+    DocumentDetail,
+    DocumentLocationRead,
     DocumentRead,
     DocumentUploadResponse,
     JobProgressRead,
@@ -73,6 +89,8 @@ async def upload_document(
     ctx: OrgContextDep,
     file: Annotated[UploadFile, File(...)],
     response: Response,
+    source_path: Annotated[str | None, Form()] = None,
+    source_modified_at: Annotated[AwareDatetime | None, Form()] = None,
 ) -> DocumentUploadResponse:
     """Accept a file upload, store it on disk, queue ingestion.
 
@@ -83,15 +101,30 @@ async def upload_document(
     queued; the task body detects the MIME type, routes it through the
     parse strategy, and moves the document to ``parsed`` or ``failed``.
 
+    ``source_path`` is the file's path in the uploader's own folder
+    structure, file name included; when omitted the file name alone is
+    used. It is recorded as a location of the document together with
+    ``source_modified_at``, the modification time the client reports.
+    Neither value affects where the file is stored.
+
     Duplicate uploads (same SHA-256 already in this org, unless that
-    document ``failed``) are not re-ingested: the stored file is removed
-    and the existing document id is returned with ``duplicate=true`` and
-    HTTP 200.
+    document ``failed``) are not re-ingested: the stored file is removed,
+    the upload's location is added to the existing document, and that
+    document's id is returned with ``duplicate=true`` and HTTP 200.
 
     Returns the new document id and job id immediately. The caller
     polls ``GET /api/orgs/{slug}/jobs/{id}`` to follow progress.
     """
     await _enforce_daily_upload_limit(ctx)
+
+    raw_path = source_path or file.filename
+    try:
+        location_path = normalise_source_path(raw_path) if raw_path else None
+    except InvalidSourcePathError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
 
     settings = get_settings()
     document_id = uuid.uuid4()
@@ -124,6 +157,14 @@ async def upload_document(
     ).scalar_one_or_none()
     if existing is not None:
         await asyncio.to_thread(shutil.rmtree, stored.path.parent, True)
+        if location_path is not None:
+            await record_location(
+                ctx.session,
+                org_id=ctx.org_id,
+                document_id=existing.id,
+                path=location_path,
+                source_modified_at=source_modified_at,
+            )
         response.status_code = status.HTTP_200_OK
         return DocumentUploadResponse(
             document_id=existing.id,
@@ -154,6 +195,15 @@ async def upload_document(
     )
     ctx.session.add(job)
     await ctx.session.flush()
+
+    if location_path is not None:
+        await record_location(
+            ctx.session,
+            org_id=ctx.org_id,
+            document_id=document_id,
+            path=location_path,
+            source_modified_at=source_modified_at,
+        )
 
     sent = await ingest_document.kiq(
         str(ctx.org_id),
@@ -191,19 +241,30 @@ async def list_documents(
 
 @documents_router.get(
     "/orgs/{slug}/documents/{document_id}",
-    response_model=DocumentRead,
+    response_model=DocumentDetail,
 )
 async def get_document(
     ctx: OrgContextDep,
     document_id: Annotated[uuid.UUID, Path(...)],
-) -> Document:
-    """Return a single document by id, or 404 if not in this org."""
+) -> DocumentDetail:
+    """Return a single document with its locations, or 404 if not in this org."""
     document = await ctx.session.scalar(
         select(Document).where(Document.id == document_id, Document.org_id == ctx.org_id),
     )
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    return document
+    locations = await ctx.session.scalars(
+        select(DocumentLocation)
+        .where(
+            DocumentLocation.document_id == document_id,
+            DocumentLocation.org_id == ctx.org_id,
+        )
+        .order_by(DocumentLocation.path),
+    )
+    return DocumentDetail(
+        **DocumentRead.model_validate(document).model_dump(),
+        locations=[DocumentLocationRead.model_validate(row) for row in locations],
+    )
 
 
 @documents_router.get(

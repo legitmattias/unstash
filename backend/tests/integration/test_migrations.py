@@ -57,6 +57,7 @@ async def test_upgrade_head_produces_expected_table_set(
         "clustering_runs",
         "clusters",
         "connectors",
+        "document_locations",
         "document_metadata",
         "documents",
         "job_progress",
