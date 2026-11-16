@@ -74,7 +74,10 @@ services:
       # HuggingFace + Docling model cache (~3 GB after first parse).
       # Named volume so the download survives container recreates.
       - worker_model_cache:/home/unstash/.cache
-    command: ["taskiq", "worker", "--workers", "1", "unstash.tasks:broker"]
+    # Each running task holds a database connection for its whole run and
+    # a parse holds its document in memory, so concurrency is bounded well
+    # below the connection pool (taskiq's default is 100 tasks at once).
+    command: ["taskiq", "worker", "--workers", "1", "--max-async-tasks", "2", "unstash.tasks:broker"]
     restart: unless-stopped
     deploy:
       resources:
