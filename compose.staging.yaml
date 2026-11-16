@@ -77,6 +77,38 @@ services:
           memory: 2500M
           cpus: "1.0"
 
+  inference:
+    # Self-hosted embedding and reranking models. Same image as api;
+    # differs only in command. Internal network only, never published:
+    # the service is unauthenticated. It mounts no secrets and has no
+    # database access.
+    image: ${API_IMAGE:?API_IMAGE must be set to the api image repository}:${IMAGE_TAG:-staging}
+    command: ["uvicorn", "--factory", "unstash.inference_server.app:create_app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    environment:
+      # Matches the CPU limit below.
+      UNSTASH_INFERENCE_THREADS: "6"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+    volumes:
+      # Model weights (~4.5 GB), downloaded on first start.
+      - inference_model_cache:/home/unstash/.cache
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      # The server listens only after both models are loaded; the first
+      # start also downloads them.
+      start_period: 900s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - internal
+    deploy:
+      resources:
+        limits:
+          # Both models resident (~5 GB) plus inference buffers.
+          memory: 6500M
+          cpus: "6.0"
+
   migrate:
     image: ${API_IMAGE:?API_IMAGE must be set to the api image repository}:${IMAGE_TAG:-staging}
     secrets:
@@ -121,6 +153,7 @@ services:
 
 volumes:
   worker_model_cache:
+  inference_model_cache:
 
 secrets:
   database_password:
