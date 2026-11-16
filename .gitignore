@@ -132,3 +132,4 @@ desktop.ini
 *.tmp
 *.bak
 *.orig
+backend/evals/retrieval/.bakeoff-cache/
