@@ -1,8 +1,8 @@
-"""The re-embed maintenance command against a real database.
+"""The requeue maintenance commands against a real database.
 
-A document is ingested normally, its embeddings are discarded the way a
-width-changing migration discards them, and the command is expected to
-bring it back to ``indexed`` through the ordinary embed task.
+Lost or invalidated work is simulated directly in the database, and the
+commands are expected to bring the document back to ``indexed`` through
+the ordinary tasks.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import pytest
 
 from tests.integration.conftest import login, seed_membership, seed_org, seed_user
 from tests.integration.test_documents_upload import app_client  # noqa: F401 — fixture
-from unstash.maintenance.requeue_embeddings import requeue_embeddings
+from unstash.maintenance.requeue import requeue_embeddings, requeue_pending
 
 if TYPE_CHECKING:
     import asyncpg
@@ -96,3 +96,41 @@ async def test_requeue_re_embeds_parsed_documents(
     assert job["status"] == "succeeded"
     assert not job["task_id"].startswith("requeue-")
     assert job["org_id"] == org_id
+
+
+async def test_requeue_ingests_documents_left_pending(
+    app_client: AsyncClient,  # noqa: F811 — fixture
+    migrations_pool: asyncpg.Pool,
+) -> None:
+    user = await seed_user(migrations_pool, USER_EMAIL, USER_PASSWORD)
+    org_id = await seed_org(migrations_pool, "acme", "Acme")
+    await seed_membership(migrations_pool, user, org_id)
+    await login(app_client, USER_EMAIL, USER_PASSWORD)
+
+    files = {"file": ("lost.txt", b"a document whose parse task was lost\n", "text/plain")}
+    response = await app_client.post("/api/orgs/acme/documents", files=files)
+    assert response.status_code == 201, response.text
+    document_id = response.json()["document_id"]
+    await _wait_for_status(app_client, document_id, "indexed")
+    assert await requeue_pending(dry_run=False) == 0
+
+    # A parse that died with its worker: nothing committed, still pending.
+    async with migrations_pool.acquire() as conn:
+        await conn.execute("DELETE FROM chunks WHERE document_id = $1", uuid.UUID(document_id))
+        await conn.execute(
+            "UPDATE documents SET status = 'pending', indexed_at = NULL WHERE id = $1",
+            uuid.UUID(document_id),
+        )
+
+    assert await requeue_pending(dry_run=True) == 1
+    assert await requeue_embeddings(dry_run=True) == 0
+
+    assert await requeue_pending(dry_run=False) == 1
+    await _wait_for_status(app_client, document_id, "indexed")
+    assert await _unembedded_chunks(migrations_pool, document_id) == 0
+
+    async with migrations_pool.acquire() as conn:
+        task_name = await conn.fetchval(
+            "SELECT task_name FROM job_progress ORDER BY created_at DESC LIMIT 1",
+        )
+    assert task_name == "ingest_document"
