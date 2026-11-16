@@ -21,6 +21,7 @@ from unstash.db.models.clustering_run import (
 )
 from unstash.db.models.connector import Connector, ConnectorProvider, ConnectorStatus
 from unstash.db.models.document import Document, DocumentStatus
+from unstash.db.models.document_location import DocumentLocation, LocationKind
 from unstash.db.models.document_metadata import DocumentMetadata
 from unstash.db.models.job_progress import JobProgress, JobStatus
 from unstash.db.models.llm_call import LlmCall, LlmCallOutcome
@@ -44,12 +45,14 @@ __all__ = [
     "ConnectorProvider",
     "ConnectorStatus",
     "Document",
+    "DocumentLocation",
     "DocumentMetadata",
     "DocumentStatus",
     "JobProgress",
     "JobStatus",
     "LlmCall",
     "LlmCallOutcome",
+    "LocationKind",
     "OrgMembership",
     "OrgRole",
     "Organisation",
