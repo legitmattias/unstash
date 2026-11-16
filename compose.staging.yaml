@@ -22,6 +22,12 @@ services:
       UNSTASH_ENVIRONMENT: staging
       UNSTASH_DEBUG: "false"
       UNSTASH_LOG_LEVEL: DEBUG
+      # Query embedding and reranking run on the self-hosted inference
+      # service. Reranking the top 10 scores the same as the top 20 at
+      # half the time.
+      UNSTASH_EMBEDDER_BACKEND: local
+      UNSTASH_RERANKER_BACKEND: local
+      UNSTASH_SEARCH_RERANK_CANDIDATES: "10"
     volumes:
       - ${DOCUMENTS_DIR:?DOCUMENTS_DIR must be the host directory holding uploaded documents}:/var/unstash/documents
     restart: unless-stopped
@@ -56,6 +62,7 @@ services:
       - ner_api_key
     environment:
       UNSTASH_ENVIRONMENT: staging
+      UNSTASH_EMBEDDER_BACKEND: local
       UNSTASH_OCR_BACKEND: mistral
       UNSTASH_NER_BACKEND: hf
       UNSTASH_NER_ENDPOINT_URL: ${NER_ENDPOINT_URL:?NER_ENDPOINT_URL must be set when UNSTASH_NER_BACKEND=hf}
