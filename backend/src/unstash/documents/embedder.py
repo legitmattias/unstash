@@ -85,11 +85,20 @@ def get_embedder(
     *,
     http_client: httpx.AsyncClient | None = None,
 ) -> Embedder:
-    """Return the configured embedder: the fake when selected, else the provider."""
+    """Return the embedder selected by ``settings.embedder_backend``."""
     if settings.embedder_backend == "fake":
-        return FakeEmbedder(dimensions=settings.jina_embedding_dimensions)
-    # Imported here: the provider module implements this module's
+        return FakeEmbedder(dimensions=settings.embedding_dimensions)
+    # Imported here: the provider modules implement this module's
     # interface, so a top-level import would be circular.
+    if settings.embedder_backend == "local":
+        from unstash.inference.local import LocalEmbedder  # noqa: PLC0415
+
+        return LocalEmbedder(
+            base_url=settings.inference_url,
+            dimensions=settings.inference_embedding_dimensions,
+            timeout=settings.inference_embed_timeout_seconds,
+            http_client=http_client,
+        )
     from unstash.inference.jina import JinaEmbedder  # noqa: PLC0415
 
     return JinaEmbedder(

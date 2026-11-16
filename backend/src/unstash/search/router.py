@@ -69,9 +69,9 @@ def _ranking_config(
         "vector_weight": settings.search_vector_weight,
         "candidate_pool": settings.search_candidate_pool,
         "embedder_backend": settings.embedder_backend,
-        "embedder_model": settings.jina_embedding_model,
+        "embedder_model": settings.embedding_model,
         "reranker_backend": settings.reranker_backend,
-        "reranker_model": settings.jina_rerank_model,
+        "reranker_model": settings.rerank_model,
         "filters": {
             "mime_type": filters.mime_type,
             "date_from": filters.date_from,

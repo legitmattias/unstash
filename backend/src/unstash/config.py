@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -139,14 +140,15 @@ class Settings(BaseSettings):
         description="HTTP timeout for a single Gotenberg conversion request.",
     )
 
-    # -- Embeddings (Jina) ----------------------------------------------------
-    # ``embedder_backend='fake'`` selects the deterministic offline embedder
-    # for tests and the CI smoke flow. ``jina_embedding_dimensions`` must match
-    # the chunks.embedding column width (see EMBEDDING_DIM in the chunk model).
+    # -- Embeddings ------------------------------------------------------------
+    # 'jina' calls the hosted API; 'local' calls the self-hosted inference
+    # service; 'fake' is the deterministic offline embedder for tests and
+    # the CI smoke flow. The selected backend's vector width must match the
+    # chunks.embedding column (see EMBEDDING_DIM in the chunk model).
 
-    embedder_backend: str = Field(
+    embedder_backend: Literal["jina", "local", "fake"] = Field(
         default="jina",
-        description="Embedding backend: 'jina' (real) or 'fake' (deterministic).",
+        description="Embedding backend: 'jina', 'local', or 'fake'.",
     )
     jina_base_url: str = Field(
         default="https://api.jina.ai/v1",
@@ -156,13 +158,32 @@ class Settings(BaseSettings):
     jina_embedding_dimensions: int = Field(default=2048, gt=0)
     jina_timeout_seconds: float = Field(default=60.0, gt=0)
 
+    # -- Self-hosted inference service ------------------------------------------
+    # Serves the 'local' embedder and reranker. Reachable only on the
+    # internal Docker network. The model names are recorded with search
+    # logs; the service itself decides which weights it loads.
+
+    inference_url: str = Field(
+        default="http://inference:8000",
+        description="Base URL of the self-hosted inference service.",
+    )
+    inference_embedding_model: str = Field(default="BAAI/bge-m3")
+    inference_embedding_dimensions: int = Field(default=1024, gt=0)
+    inference_rerank_model: str = Field(default="BAAI/bge-reranker-v2-m3")
+    inference_embed_timeout_seconds: float = Field(default=120.0, gt=0)
+    inference_rerank_timeout_seconds: float = Field(
+        default=15.0,
+        gt=0,
+        description="Past this, search returns fusion-ranked results.",
+    )
+
     # -- Search (hybrid retrieval + rerank) -------------------------------------
     # Fusion defaults come from the measured fusion-sweep experiments on
     # the golden retrieval set; see backend/evals/retrieval/reports/.
 
-    reranker_backend: str = Field(
+    reranker_backend: Literal["jina", "local", "fake"] = Field(
         default="jina",
-        description="Rerank backend: 'jina' (real) or 'fake' (deterministic).",
+        description="Rerank backend: 'jina', 'local', or 'fake'.",
     )
     jina_rerank_model: str = Field(default="jina-reranker-v3")
     search_candidate_pool: int = Field(
@@ -269,6 +290,27 @@ class Settings(BaseSettings):
     ner_api_key: str = Field(default="", alias="ner_api_key")
 
     # -- Derived properties ----------------------------------------------------
+
+    @property
+    def embedding_dimensions(self) -> int:
+        """Vector width produced by the selected embedder backend."""
+        if self.embedder_backend == "local":
+            return self.inference_embedding_dimensions
+        return self.jina_embedding_dimensions
+
+    @property
+    def embedding_model(self) -> str:
+        """Model name of the selected embedder backend."""
+        if self.embedder_backend == "local":
+            return self.inference_embedding_model
+        return self.jina_embedding_model
+
+    @property
+    def rerank_model(self) -> str:
+        """Model name of the selected reranker backend."""
+        if self.reranker_backend == "local":
+            return self.inference_rerank_model
+        return self.jina_rerank_model
 
     @property
     def database_url(self) -> URL:
